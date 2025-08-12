@@ -1,0 +1,5 @@
+flask
+pymongo
+google-cloud-pubsub
+google-cloud-secret-manager
+gunicorn
