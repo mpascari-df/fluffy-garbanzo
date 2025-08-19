@@ -25,7 +25,7 @@ fi
 echo "--- Manually Triggering Cloud Run Service ---"
 echo "Project ID:           $PROJECT_ID"
 echo "Service Name:         $CLOUD_RUN_SERVICE_NAME"
-echo "Region:               europe-west1"
+echo "Region:               $REGION"
 echo "-------------------------------------------"
 
 # Step 1: Get an identity token for authentication
@@ -39,7 +39,6 @@ echo "Authentication token fetched."
 
 # Step 2: Get the Cloud Run service URL
 SERVICE_NAME="$CLOUD_RUN_SERVICE_NAME"
-REGION="europe-west1"
 SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" \
   --region="$REGION" \
   --project="$PROJECT_ID" \

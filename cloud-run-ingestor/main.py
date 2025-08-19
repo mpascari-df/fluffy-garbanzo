@@ -1,10 +1,14 @@
-# main.py
+# main.py for Cloud Run Service
+# This service listens to a MongoDB change stream and publishes
+# events to a Pub/Sub topic in CloudEvents format.
+
 import os
 import json
 import signal
 import threading
 import time
 import uuid
+import base64
 from datetime import datetime, timezone
 
 import pymongo
@@ -17,8 +21,8 @@ from flask import Flask, request
 PROJECT_ID = os.getenv("PROJECT_ID")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME")
 PUBSUB_TOPIC_NAME = os.getenv("PUBSUB_TOPIC_NAME")
-PUBSUB_DEAD_LETTER_TOPIC_NAME = os.getenv("PUBSUB_DEAD_LETTER_TOPIC")
-MONGO_URI_SECRET_ID = "mongo-uri" # The name of the secret we created
+PUBSUB_DEAD_LETTER_TOPIC_NAME = os.getenv("PUBLISHER_DLQ_TOPIC_NAME")
+MONGO_URI_SECRET_ID = os.getenv("MONGO_URI_SECRET_ID")
 
 # --- Helper function to access Secret Manager ---
 def access_secret_version(project_id, secret_id, version_id="latest"):
@@ -66,6 +70,7 @@ def format_change_event(change):
     message = {
         "operation": operation,
         "collection": change.get("ns", {}).get("coll"),
+        "database": change.get("ns", {}).get("db"), # Added for consistency
         "document": document,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "oplog_timestamp": str(change.get("clusterTime")),
@@ -75,21 +80,32 @@ def format_change_event(change):
 
 def publish_to_pubsub(message_data):
     """
-    Publishes a message to the main Pub/Sub topic.
+    Publishes a message to the main Pub/Sub topic in CloudEvents format.
     If publishing fails after retries, it attempts to publish to a dead-letter topic.
     """
     try:
         # Use json_util.dumps for robust serialization of BSON types like ObjectId
-        payload = json_util.dumps(message_data).encode("utf-8")
+        # First, serialize the message data to JSON string
+        json_payload = json_util.dumps(message_data)
+        
+        # Second, encode it to base64 as required for a CloudEvent
+        encoded_data = base64.b64encode(json_payload.encode('utf-8')).decode('utf-8')
 
-        # The publisher client has built-in retry logic for transient errors.
-        # We are relying on the default robust policies which use exponential backoff.
-        # See: https://cloud.google.com/pubsub/docs/publisher#using_retry_policies
-        future = publisher.publish(topic_path, payload)
+        # Third, wrap the encoded data in the CloudEvents structure
+        event_payload = {
+            "message": {
+                "data": encoded_data,
+                "attributes": {
+                    "operation": message_data["operation"],
+                    "collection": message_data["collection"]
+                }
+            }
+        }
+        
+        # Finally, publish the CloudEvent-formatted payload
+        # The Pub/Sub client handles the final encoding to bytes for the API call.
+        future = publisher.publish(topic_path, json.dumps(event_payload).encode("utf-8"))
 
-        # .result() blocks until the message is published or a non-retryable
-        # error occurs. A timeout is added to prevent the thread from blocking
-        # indefinitely, which is critical for graceful shutdown.
         message_id = future.result(timeout=5.0)
         print(f"Published message ID: {message_id} for operation: {message_data['operation']} on collection: {message_data['collection']}")
     except Exception as e:
@@ -109,8 +125,6 @@ def publish_to_pubsub(message_data):
                 dlq_message_id = future.result(timeout=5.0)
                 print(f"Successfully published message to dead-letter topic. DLQ Message ID: {dlq_message_id}")
             except Exception as dlq_e:
-                # If even the DLQ fails, we have a serious problem.
-                # Log it loudly. The message is now lost.
                 print(f"CRITICAL: Failed to publish message to dead-letter topic '{PUBSUB_DEAD_LETTER_TOPIC_NAME}'. DATA LOSS OCCURRED. Error: {dlq_e}")
                 print(f"Lost message payload: {message_data}")
         else:
@@ -125,14 +139,11 @@ def start_change_stream_listener():
     and handles graceful shutdown.
     """
     print(f"Starting change stream listener for database '{MONGO_DB_NAME}'...")
-    # In a real-world scenario, this token should be persisted to a database or
-    # a file to survive service restarts. For now, it handles reconnections.
     resume_token = None
 
     while not shutdown_event.is_set():
         try:
             pipeline = [{'$match': {'operationType': {'$in': ['insert', 'update', 'delete']}}}]
-            # Start watching with a resume token if we have one from a previous iteration
             with db.watch(pipeline, full_document='updateLookup', resume_after=resume_token) as stream:
                 if resume_token is None:
                     print("Successfully connected to MongoDB change stream.")
@@ -141,12 +152,9 @@ def start_change_stream_listener():
 
                 resume_token = stream.resume_token
 
-                # Use stream.try_next() in a loop for non-blocking iteration.
-                # This allows us to check for the shutdown signal periodically.
                 while stream.alive and not shutdown_event.is_set():
                     change = stream.try_next()
                     if change is None:
-                        # No new change, wait a bit to prevent a busy loop.
                         time.sleep(0.5)
                         continue
 
@@ -155,12 +163,10 @@ def start_change_stream_listener():
                     if formatted_message:
                         publish_to_pubsub(formatted_message)
 
-                    # Always update the resume token after processing a change
                     resume_token = stream.resume_token
 
         except pymongo.errors.PyMongoError as e:
             print(f"ERROR: MongoDB connection error: {e}. Reconnecting in 5 seconds...")
-            # Don't try to reconnect if we are shutting down.
             if not shutdown_event.is_set():
                 time.sleep(5)
         except Exception as e:
@@ -171,29 +177,18 @@ def start_change_stream_listener():
     print("Shutdown signal received. Change stream listener has stopped.")
 
 # --- Background Thread & Health Check ---
-
-# Start the listener in a background thread. This is crucial for Cloud Run,
-# as it allows the main thread to serve HTTP requests (like health checks)
-# while the listener runs continuously.
 listener_thread = threading.Thread(target=start_change_stream_listener)
 
 def signal_handler(signum, frame):
     """
     Gracefully handle termination signals (like SIGTERM from Cloud Run).
-    This function signals the listener thread to stop, waits for it to finish,
-    and then cleans up resources like the MongoDB client connection.
     """
     print(f"Received signal {signum}. Initiating graceful shutdown...")
 
-    # 1. Signal the listener thread to stop its work.
     shutdown_event.set()
 
-    # 2. Wait for the listener thread to finish. Cloud Run gives a 10-second
-    # grace period before sending SIGKILL. We wait for a slightly shorter
-    # time to allow for final cleanup steps.
     listener_thread.join(timeout=8.0)
 
-    # 3. Clean up the MongoDB client connection pool.
     print("Closing MongoDB client connection...")
     mongo_client.close()
     print("Shutdown complete.")
