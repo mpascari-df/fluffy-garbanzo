@@ -95,3 +95,4 @@ crash.*.log
 
 # Exclude compressed backups
 *.tar.gz
+*REPORT.md
