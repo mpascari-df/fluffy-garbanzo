@@ -1,6 +1,8 @@
 # main.py for Cloud Run Service
 # This service listens to a MongoDB change stream and publishes
 # events to a Pub/Sub topic in CloudEvents format.
+#
+# This modified version also includes a new POST endpoint for manual testing.
 
 import os
 import json
@@ -96,8 +98,8 @@ def publish_to_pubsub(message_data):
             "message": {
                 "data": encoded_data,
                 "attributes": {
-                    "operation": message_data["operation"],
-                    "collection": message_data["collection"]
+                    "operation": message_data.get("operation", "unknown"),
+                    "collection": message_data.get("collection", "unknown")
                 }
             }
         }
@@ -107,7 +109,7 @@ def publish_to_pubsub(message_data):
         future = publisher.publish(topic_path, json.dumps(event_payload).encode("utf-8"))
 
         message_id = future.result(timeout=5.0)
-        print(f"Published message ID: {message_id} for operation: {message_data['operation']} on collection: {message_data['collection']}")
+        print(f"Published message ID: {message_id} for operation: {message_data.get('operation')} on collection: {message_data.get('collection')}")
     except Exception as e:
         print(f"ERROR: Failed to publish message to Pub/Sub topic '{PUBSUB_TOPIC_NAME}': {e}")
         # If publishing fails, try sending to the dead-letter topic if configured.
@@ -197,6 +199,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 listener_thread.daemon = True
 listener_thread.start()
 
+# --- Health Check Endpoints ---
 @app.route('/health')
 def health_check():
     """
@@ -212,6 +215,27 @@ def health_check():
 @app.route('/')
 def index():
     return 'MongoDB Change Stream Ingestor. Use /health for status.', 200
+
+# --- New Route for Manual Testing ---
+@app.route('/test-publish', methods=['POST'])
+def test_manual_publish():
+    """
+    Endpoint for manually testing the Pub/Sub publishing logic.
+    Accepts a JSON payload and publishes it to Pub/Sub.
+    """
+    try:
+        data = request.get_json(silent=True)
+        if not data:
+            return "Invalid JSON payload or no data provided.", 400
+
+        # The data is in the format expected by publish_to_pubsub
+        publish_to_pubsub(data)
+        
+        return "Message payload received and sent to Pub/Sub successfully!", 200
+
+    except Exception as e:
+        print(f"ERROR: Failed to process manual test publish request: {e}")
+        return "An internal server error occurred during processing.", 500
 
 # This block is for local development. Gunicorn is used in production via the Dockerfile.
 if __name__ == '__main__':

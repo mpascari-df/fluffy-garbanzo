@@ -4,6 +4,7 @@ AGENT.md
 report.md
 config.sh
 */context
+*tf_bckp*
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -102,3 +103,4 @@ dataflow/context/mongodb customers collection schema mapping.md
 dataflow/context/mongodb info.txt
 dataflow/dynamic_schema_evaluation.md
 dataflow/main.py.bckp
+sample_customer.json
