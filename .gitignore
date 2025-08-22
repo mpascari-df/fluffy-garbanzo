@@ -1,8 +1,9 @@
 AGENTS.md
-/dataflow_job
+AGENT.md
 /dogfy-data-sandbox-infra
 report.md
 config.sh
+*/context
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -96,3 +97,8 @@ crash.*.log
 # Exclude compressed backups
 *.tar.gz
 *REPORT.md
+dataflow/context/dfd_d_client_tf.ipynb
+dataflow/context/mongodb customers collection schema mapping.md
+dataflow/context/mongodb info.txt
+dataflow/dynamic_schema_evaluation.md
+dataflow/main.py.bckp
