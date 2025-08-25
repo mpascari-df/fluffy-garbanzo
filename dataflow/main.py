@@ -5,7 +5,8 @@ from datetime import datetime
 import os
 
 import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions
+
+from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions, GoogleCloudOptions
 from apache_beam.pvalue import TaggedOutput
 
 # Import the schemas and the new mapping configurations
@@ -53,114 +54,83 @@ class TransformAndFlattenDoFn(beam.DoFn):
             element (str): A JSON string representing a single record.
 
         Yields:
-            tuple: A (collection_name, record_dict) tuple for the main output.
-            str: A JSON string for the dead-letter output on failure.
+            tuple: A (collection_name, record_dict) tuple for the main output,
+                   or a string for the dead-letter queue.
         """
         try:
-            data = json.loads(element)
+            # Parse the JSON record
+            record = json.loads(element)
+            collection_name = record.get('collection_name')
+            
+            # Use the correct mapping for the collection
+            if collection_name not in self._mappings:
+                raise ValueError(f"No mapping found for collection: {collection_name}")
+            
+            mapping = self._mappings[collection_name]
+            
+            # Flatten the nested dictionary
+            flattened_record = flatten_dict(record)
+            
+            # Apply transformations and create the final structured record
+            structured_record = {}
+            for target_field, (source_path, transform_func) in mapping.items():
+                if isinstance(source_path, Literal):
+                    value = source_path.value
+                elif callable(source_path):
+                    value = source_path()
+                else:
+                    value = flattened_record.get(source_path)
 
-            # The upstream ingestor standardizes the payload.
-            # We get the collection name to select the right schema and processing logic.
-            collection_name = data.get('collection')
-            if not collection_name:
-                logging.warning("Skipping record without 'collection' key: %s", data)
-                return
+                if transform_func:
+                    value = transform_func(value)
+                
+                structured_record[target_field] = value
 
-            target_schema = self._schemas.get(collection_name)
-            mapping = self._mappings.get(collection_name)
-
-            if not target_schema or not mapping:
-                logging.warning(
-                    "No schema or mapping found for collection '%s'. Skipping record.",
-                    collection_name
-                )
-                return
-
-            # The original document is placed inside the 'document' key.
-            record = data.get('document')
-            if not record:
-                logging.warning("Skipping record without 'document' key: %s", data)
-                return
-
-            flat_record = flatten_dict(record)
-            output_record = {}
-
-            # Iterate through the fields defined in the target schema
-            for field in target_schema:
-                target_name = field.name
-                rule = mapping.get(target_name)
-
-                if not rule:
-                    # If no mapping rule is found, fill with None to maintain schema
-                    output_record[target_name] = None
-                    continue
-
-                source_spec, transform_fn = rule
-                raw_value = None
-
-                if isinstance(source_spec, Literal):
-                    raw_value = source_spec.value
-                elif callable(source_spec):
-                    raw_value = source_spec()
-                elif isinstance(source_spec, str):
-                    raw_value = flat_record.get(source_spec)
-
-                # Apply the transformation function if one is provided
-                final_value = transform_fn(raw_value) if transform_fn else raw_value
-                output_record[target_name] = final_value
-
-            yield (collection_name, output_record)
+            # Yield the processed record with a tag for the main output
+            yield (collection_name, structured_record)
 
         except Exception as e:
-            # Any exception during processing will route the original element to the DLQ
-            logging.error(
-                "Record failed transformation and is being sent to dead-letter queue. Error: %s, Record: %s",
-                e, element
-            )
-            error_payload = {
-                "error": str(e),
-                "timestamp": datetime.utcnow().isoformat(),
-                "original_record": element
-            }
-            yield TaggedOutput('dead_letter', json.dumps(error_payload))
+            logging.error('Failed to process element: %s, error: %s', element, e)
+            # Yield the failed element to the dead-letter queue
+            yield TaggedOutput('dead_letter', element)
 
 
 def run():
-    """Main entry point; defines and runs the pipeline."""
+    """Main entry point for the pipeline."""
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--input',
         dest='input',
         required=True,
-        help='Input GCS path for the JSON files (e.g., gs://bucket/path/*).')
+        help='Input file to process.')
     parser.add_argument(
         '--output',
         dest='output',
         required=True,
-        help='Output GCS path to write the Parquet files.')
+        help='Output file to write results to.')
     parser.add_argument(
-        '--dead_letter_output',
+        '--dead-letter-output',
         dest='dead_letter_output',
         required=True,
-        help='GCS path to write failed records for the dead-letter queue.')
-
+        help='Output path for records that fail transformation.')
+    
     known_args, pipeline_args = parser.parse_known_args()
+
+    # Pass the pipeline args to the PipelineOptions object
     pipeline_options = PipelineOptions(pipeline_args)
 
     with beam.Pipeline(options=pipeline_options) as p:
-        raw_records = (p
-         # The input reading logic is correct for single-JSON-per-file.
-         # No changes are needed here.
-         | 'MatchFiles' >> beam.io.fileio.MatchFiles(known_args.input)
-         | 'ReadMatches' >> beam.io.fileio.ReadMatches()
-         | 'ReadFileContent' >> beam.Map(lambda file: file.read_utf8())
-        )
+        
+        # Read the raw JSON data.
+        raw_data = (p
+            | 'ReadFromGCS' >> beam.io.ReadFromText(known_args.input))
 
-        # The transformation step now produces multiple outputs. We use with_outputs
-        # to capture the main output and the 'dead_letter' tagged output.
-        transform_results = (raw_records
-            | 'TransformAndTag' >> beam.ParDo(
-                TransformAndFlattenDoFn(schemas=SCHEMAS, mappings=MAPPINGS)
+        # Apply the transformation logic to the raw data.
+        # This will produce two PCollections: one for successful records and one for failed records.
+        transform_results = (raw_data
+            | 'TransformAndFlatten' >> beam.ParDo(
+                TransformAndFlattenDoFn(SCHEMAS, MAPPINGS)
             ).with_outputs('dead_letter', main='main_output')
         )
 
@@ -191,6 +161,7 @@ def run():
                 os.path.join(known_args.dead_letter_output, 'failed_records'),
                 file_name_suffix='.jsonl'
             ))
+
 
 if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)

@@ -33,9 +33,14 @@ if [ -z "$PROJECT_ID" ] || [ -z "$REGION" ] || [ -z "$GCS_DATAFLOW_BUCKET_NAME" 
 fi
 
 # --- Template Configuration ---
-# Values are sourced from config.sh
-IMAGE_NAME="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY_REPO_NAME}/${DATAFLOW_TEMPLATE_NAME}"
-TEMPLATE_FILE_GCS_PATH="gs://${GCS_DATAFLOW_BUCKET_NAME}/dataflow/templates/${DATAFLOW_TEMPLATE_NAME}.json"
+# Generate a unique timestamp that will serve as the image tag and template identifier.
+# This ensures that each deployment is unique, preventing caching issues.
+IMAGE_TAG="$(date +%Y%m%d-%H%M%S)"
+
+# Define the full image and template paths using the unique tag.
+# Note that the image name now includes the unique tag.
+IMAGE_NAME="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY_REPO_NAME}/${DATAFLOW_TEMPLATE_NAME}:${IMAGE_TAG}"
+TEMPLATE_FILE_GCS_PATH="gs://${GCS_DATAFLOW_BUCKET_NAME}/dataflow/templates/${DATAFLOW_TEMPLATE_NAME}:${IMAGE_TAG}.json"
 
 # --- Source Directory ---
 SOURCE_DIR="${SCRIPT_DIR}/../dataflow"
@@ -72,6 +77,11 @@ echo "  - Granting 'roles/storage.objectAdmin' on the Dataflow GCS bucket..."
 gcloud storage buckets add-iam-policy-binding "gs://${GCS_DATAFLOW_BUCKET_NAME}" \
     --member="serviceAccount:${DATAFLOW_SA}" \
     --role="roles/storage.objectAdmin" > /dev/null # Suppress verbose output
+
+echo "  - Granting 'roles/artifactregistry.reader' on the Dataflow GCS bucket..."
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:$DATAFLOW_SA" \
+    --role="roles/artifactregistry.reader" > /dev/null # Suppress verbose output
 
 # Step 3: Create Artifact Registry repository if it doesn't exist
 echo "Checking for Artifact Registry repository '$ARTIFACT_REGISTRY_REPO_NAME'..."

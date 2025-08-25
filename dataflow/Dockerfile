@@ -10,6 +10,10 @@ ENV FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE=/template/requirements.txt
 # Copy the requirements file to the template directory.
 COPY requirements.txt /template/
 
+# Uninstall pre-installed apache-beam to prevent conflicts
+# RUN pip uninstall -y apache-beam
+RUN pip install --no-cache-dir --upgrade --force-reinstall -r /template/requirements.txt
+
 # Install the Python dependencies. This is done in a separate step to leverage Docker layer caching.
 RUN pip install --no-cache-dir -r /template/requirements.txt
 

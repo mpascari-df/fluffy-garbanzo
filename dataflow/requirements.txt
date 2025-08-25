@@ -1,2 +1,2 @@
-apache-beam[gcp]
+apache-beam[gcp]==2.67.0
 pyarrow

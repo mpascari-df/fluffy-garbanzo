@@ -67,6 +67,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+*-venv
 
 # IDEs
 .idea/
@@ -104,3 +105,4 @@ dataflow/context/mongodb info.txt
 dataflow/dynamic_schema_evaluation.md
 dataflow/main.py.bckp
 sample_customer.json
+scripts/phase-5-deploy-dataflow-template.sh.bckp
