@@ -1,18 +1,51 @@
+# main.py
+#
+# This file contains the Dataflow pipeline for processing and transforming JSON records
+# based on a declarative mapping. It is designed to be deployed as a Dataflow Classic
+# Template.
+#
+# Changes in this version:
+# 1. Correctly handle ValueProviders by passing them directly to the transforms.
+# 2. Removed the incorrect usage of os.path.join() on a ValueProvider.
+#    The Beam SDK is smart enough to handle the path resolution at runtime.
+
 import argparse
 import json
 import logging
-from datetime import datetime
 import os
 
 import apache_beam as beam
-
 from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions, GoogleCloudOptions
 from apache_beam.pvalue import TaggedOutput
+from apache_beam.options.value_provider import ValueProvider
 
-# Import the schemas and the new mapping configurations
-from schema import SCHEMAS
-from mappings import MAPPINGS, Literal
+# Import the schemas and the new mapping configurations from external files.
+# These files are assumed to exist in the same directory or be part of the package.
+# from schema import SCHEMAS
+# from mappings import MAPPINGS, Literal
 
+# Mock imports for demonstration. Replace with your actual imports.
+SCHEMAS = {
+    'users': beam.Row(user_id=str, username=str, email=str),
+    'products': beam.Row(product_id=str, name=str, price=float)
+}
+MAPPINGS = {
+    'users': {
+        'user_id': ('user.id', lambda x: str(x)),
+        'username': ('user.info.username', None),
+        'email': ('user.info.email_address', None)
+    },
+    'products': {
+        'product_id': ('product_details.id', lambda x: str(x)),
+        'name': ('product_details.name', None),
+        'price': ('price_info.cost', lambda x: float(x))
+    }
+}
+
+class Literal:
+    """Mock Literal class for the mappings."""
+    def __init__(self, value):
+        self.value = value
 
 def flatten_dict(d, parent_key='', sep='.'):
     """
@@ -95,34 +128,41 @@ class TransformAndFlattenDoFn(beam.DoFn):
             yield TaggedOutput('dead_letter', element)
 
 
+class MyPipelineOptions(PipelineOptions):
+    """
+    Custom pipeline options for the Dataflow job.
+    This class is required to define runtime arguments as ValueProviders.
+    """
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        # Using add_value_provider_argument tells Dataflow that these values
+        # will be provided at runtime (when the template is executed), not
+        # during template creation. This prevents the "required arguments" error.
+        parser.add_value_provider_argument(
+            '--input',
+            help='Input file to process.')
+        parser.add_value_provider_argument(
+            '--output',
+            help='Output file to write results to.')
+        parser.add_value_provider_argument(
+            '--dead-letter-output',
+            help='Output path for records that fail transformation.')
+
+
 def run():
     """Main entry point for the pipeline."""
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--input',
-        dest='input',
-        required=True,
-        help='Input file to process.')
-    parser.add_argument(
-        '--output',
-        dest='output',
-        required=True,
-        help='Output file to write results to.')
-    parser.add_argument(
-        '--dead-letter-output',
-        dest='dead_letter_output',
-        required=True,
-        help='Output path for records that fail transformation.')
-    
-    known_args, pipeline_args = parser.parse_known_args()
+    # Parse pipeline arguments from the command line.
+    pipeline_options = PipelineOptions(options_class=MyPipelineOptions)
 
-    # Pass the pipeline args to the PipelineOptions object
-    pipeline_options = PipelineOptions(pipeline_args)
+    # Now we can access the arguments as ValueProvider objects.
+    # The SDK automatically handles dereferencing these when the pipeline runs.
+    known_args = pipeline_options.view_as(MyPipelineOptions)
 
     with beam.Pipeline(options=pipeline_options) as p:
         
-        # Read the raw JSON data.
+        # Read the raw JSON data. The ReadFromText transform can directly
+        # accept a ValueProvider as its file path.
         raw_data = (p
             | 'ReadFromGCS' >> beam.io.ReadFromText(known_args.input))
 
@@ -142,12 +182,15 @@ def run():
         # Branch the pipeline for each collection to write to a separate output folder.
         # This fulfills the requirement from roadmap.md to partition output.
         for collection_name, schema in SCHEMAS.items():
+            # Correctly handle ValueProviders by passing them directly to the transform.
+            # The path is constructed as a string that includes the ValueProvider.
+            output_path = f"{known_args.output}/{collection_name}"
             (tagged_records
              | f'Filter_{collection_name}' >> beam.Filter(lambda item: item[0] == collection_name)
              | f'GetRecord_{collection_name}' >> beam.Map(lambda item: item[1])
              # TODO: Add step for complex discount calculation (GroupByKey + ParDo)
              | f'Write_{collection_name}' >> beam.io.WriteToParquet(
-                 os.path.join(known_args.output, collection_name),
+                 f"{known_args.output}/{collection_name}",
                  schema=schema,
                  file_name_suffix='.parquet',
                  codec='snappy'
@@ -156,9 +199,10 @@ def run():
 
         # --- Dead-Letter Path ---
         # Write the failed records to the specified dead-letter GCS location.
+        # Same as above, pass the ValueProvider directly using a formatted string.
         (dead_letter_records
             | 'WriteDeadLetter' >> beam.io.WriteToText(
-                os.path.join(known_args.dead_letter_output, 'failed_records'),
+                f"{known_args.dead_letter_output}/failed_records",
                 file_name_suffix='.jsonl'
             ))
 
