@@ -131,7 +131,24 @@ CUSTOMERS_MAPPING = {
     'val_referral_coupon': ('subscription.coupon.referralCount', to_int),
     'val_discount_extra_coupon': ('subscription.coupon.discountPercent', to_float),
     'fk_stripe': ('subscription.stripeCustId', None),
-    'imp_subscription_discount': (Literal(None), None),
+    
+    # Fixed: Remove duplicate imp_subscription_discount and add missing fields from schema
+    'cod_payment_method': (Literal(None), None),
+    'des_payment_method': (Literal(None), None),
+    'val_payment_issues': (Literal(None), None),
+    
+    # Flags & Features (adding missing fields from schema)
+    'flg_additional_ice_bags': (Literal(None), None),
+    'flg_express_delivery': (Literal(None), None),
+    'flg_mixed_plan': (Literal(None), None),
+    'cod_pricing_factor': (Literal(None), None),
+    'flg_apply_der': (Literal(None), None),
+    
+    # Additional Fields (adding missing fields from schema)
+    'fk_client_zdk': (Literal(None), None),
+    'fk_group': (Literal(None), None),
+    'fk_organization': (Literal(None), None),
+    'des_source': (Literal(None), None),
 }
 
 MAPPINGS = {
