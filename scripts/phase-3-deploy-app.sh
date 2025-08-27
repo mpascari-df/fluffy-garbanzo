@@ -17,8 +17,9 @@ fi
 source "$CONFIG_FILE"
 
 # --- Configuration Validation ---
-if [ -z "$PROJECT_ID" ] || [ -z "$PUBSUB_TOPIC_NAME" ] || [ -z "$MONGO_DB_NAME" ] || [ -z "$PUBLISHER_DLQ_TOPIC_NAME" ] || [ -z "$CLOUD_RUN_SERVICE_NAME" ] || [ -z "$REGION" ] || [ -z "$CLOUD_RUN_SA" ] || [ -z "$MONGO_URI" ]; then
-    echo "ERROR: PROJECT_ID, PUBSUB_TOPIC_NAME, MONGO_DB_NAME, PUBLISHER_DLQ_TOPIC_NAME, CLOUD_RUN_SERVICE_NAME, REGION, CLOUD_RUN_SA, and MONGO_URI must be set in '$CONFIG_FILE'."
+# **Added KEEP_ALIVE_CLOUD_RUN_INGESTOR to validation**
+if [ -z "$PROJECT_ID" ] || [ -z "$PUBSUB_TOPIC_NAME" ] || [ -z "$MONGO_DB_NAME" ] || [ -z "$PUBLISHER_DLQ_TOPIC_NAME" ] || [ -z "$CLOUD_RUN_SERVICE_NAME" ] || [ -z "$REGION" ] || [ -z "$CLOUD_RUN_SA" ] || [ -z "$MONGO_URI" ] || [ -z "$KEEP_ALIVE_CLOUD_RUN_INGESTOR" ]; then
+    echo "ERROR: PROJECT_ID, PUBSUB_TOPIC_NAME, MONGO_DB_NAME, PUBLISHER_DLQ_TOPIC_NAME, CLOUD_RUN_SERVICE_NAME, REGION, CLOUD_RUN_SA, MONGO_URI, and KEEP_ALIVE_CLOUD_RUN_INGESTOR must be set in '$CONFIG_FILE'."
     exit 1
 fi
 
@@ -31,6 +32,7 @@ echo "Pub/Sub DLQ Topic:    $PUBLISHER_DLQ_TOPIC_NAME"
 echo "MongoDB Database:     $MONGO_DB_NAME"
 echo "Cloud Run Service:    $CLOUD_RUN_SERVICE_NAME"
 echo "Cloud Run SA:         $CLOUD_RUN_SA"
+echo "Keep Instance Alive:  $KEEP_ALIVE_CLOUD_RUN_INGESTOR" # **Added for clarity**
 echo "---------------------------------"
 
 # Step 1: Enable necessary APIs
@@ -70,7 +72,16 @@ fi
 echo "Building and pushing container image to Artifact Registry..."
 gcloud builds submit "${SCRIPT_DIR}/../cloud-run-ingestor" --tag "$IMAGE_NAME" --project="$PROJECT_ID"
 
-# Step 6: Deploy the container image to Cloud Run.
+# **Step 6: Conditionally set the min-instances flag**
+MIN_INSTANCES_FLAG=""
+if [ "$KEEP_ALIVE_CLOUD_RUN_INGESTOR" == "true" ]; then
+    MIN_INSTANCES_FLAG="--min-instances=1"
+    echo "Configuration set to keep at least one instance running (warm)."
+else
+    echo "Configuration set to allow scaling to zero."
+fi
+
+# Step 7: Deploy the container image to Cloud Run.
 # Note: MONGO_URI is no longer passed as an environment variable.
 # The application will fetch it from Secret Manager.
 echo "Deploying the container image to Cloud Run..."
@@ -82,6 +93,7 @@ gcloud run deploy "$CLOUD_RUN_SERVICE_NAME" \
   --no-allow-unauthenticated \
   --execution-environment=gen2 \
   --max-instances=1 \
+  $MIN_INSTANCES_FLAG \
   --set-env-vars "MONGO_DB_NAME=${MONGO_DB_NAME},PUBSUB_TOPIC_NAME=${PUBSUB_TOPIC_NAME},PROJECT_ID=${PROJECT_ID},PUBLISHER_DLQ_TOPIC_NAME=${PUBLISHER_DLQ_TOPIC_NAME},MONGO_URI_SECRET_ID=${MONGO_URI}" \
   --port=8080 \
   --cpu=1 \
@@ -90,3 +102,4 @@ gcloud run deploy "$CLOUD_RUN_SERVICE_NAME" \
  
 echo "Cloud Run service '$CLOUD_RUN_SERVICE_NAME' deployment initiated."
 echo "You can check the deployment status in the Google Cloud Console."
+echo "---------------------------------"
