@@ -52,7 +52,10 @@ gcloud secrets add-iam-policy-binding "$MONGO_URI" \
 
 # Step 3: Set names for Cloud Run service, Artifact Registry, and the container image.
 REPO_NAME="data-ingestion-repo" # Name for the Artifact Registry repository
-IMAGE_NAME="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${CLOUD_RUN_SERVICE_NAME}"
+
+# Create a timestamp for a unique image tag
+TIMESTAMP=$(date +%Y%m%d%H%M%S)
+IMAGE_NAME="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${CLOUD_RUN_SERVICE_NAME}:${TIMESTAMP}"
 
 # Step 4: Create Artifact Registry repository if it doesn't exist
 echo "Checking for Artifact Registry repository '$REPO_NAME'..."
@@ -73,18 +76,19 @@ echo "Building and pushing container image to Artifact Registry..."
 gcloud builds submit "${SCRIPT_DIR}/../cloud-run-ingestor" --tag "$IMAGE_NAME" --project="$PROJECT_ID"
 
 # **Step 6: Conditionally set the min-instances flag**
+# We explicitly set the min-instances flag to ensure the configuration is
+# applied correctly on every redeployment, overriding any previous settings.
 MIN_INSTANCES_FLAG=""
 if [ "$KEEP_ALIVE_CLOUD_RUN_INGESTOR" == "true" ]; then
     MIN_INSTANCES_FLAG="--min-instances=1"
-    echo "Configuration set to keep at least one instance running (warm)."
+    echo "✅ Configuration set to keep at least one instance running (warm)."
 else
-    echo "Configuration set to allow scaling to zero."
+    MIN_INSTANCES_FLAG="--min-instances=0"
+    echo "😴 Configuration set to allow scaling to zero when idle."
 fi
 
 # Step 7: Deploy the container image to Cloud Run.
-# Note: MONGO_URI is no longer passed as an environment variable.
-# The application will fetch it from Secret Manager.
-echo "Deploying the container image to Cloud Run..."
+echo "🚀 Deploying the container image to Cloud Run..."
 gcloud run deploy "$CLOUD_RUN_SERVICE_NAME" \
   --image "$IMAGE_NAME" \
   --region "$REGION" \
@@ -99,7 +103,7 @@ gcloud run deploy "$CLOUD_RUN_SERVICE_NAME" \
   --cpu=1 \
   --memory=512Mi \
   # --startup-probe='path=/health,period=15,timeout=10,failure-threshold=3' # Temporarily disabled for deployment testing.
- 
+
 echo "Cloud Run service '$CLOUD_RUN_SERVICE_NAME' deployment initiated."
 echo "You can check the deployment status in the Google Cloud Console."
 echo "---------------------------------"

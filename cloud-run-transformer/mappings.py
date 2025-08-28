@@ -312,6 +312,161 @@ def extract_sales_comments_count(sales_obj):
     comments = sales_obj.get('comments', [])
     return len(comments) if isinstance(comments, list) else 0
 
+# Helper functions for contacts-logs
+
+def extract_logs_count(logs_array):
+    """Count number of communication logs"""
+    if not logs_array or not isinstance(logs_array, list):
+        return 0
+    return len(logs_array)
+
+def extract_last_log_type(logs_array):
+    """Extract event type of the last log entry"""
+    if not logs_array or not isinstance(logs_array, list) or len(logs_array) == 0:
+        return None
+    
+    last_log = logs_array[-1]  # Assuming logs are in chronological order
+    if isinstance(last_log, dict) and 'eventType' in last_log:
+        return last_log['eventType']
+    return None
+
+def extract_last_log_direction(logs_array):
+    """Extract direction of the last log entry"""
+    if not logs_array or not isinstance(logs_array, list) or len(logs_array) == 0:
+        return None
+    
+    last_log = logs_array[-1]  # Assuming logs are in chronological order
+    if isinstance(last_log, dict) and 'direction' in last_log:
+        return last_log['direction']
+    return None
+
+def extract_last_log_status(logs_array):
+    """Extract status of the last log entry"""
+    if not logs_array or not isinstance(logs_array, list) or len(logs_array) == 0:
+        return None
+    
+    last_log = logs_array[-1]  # Assuming logs are in chronological order
+    if isinstance(last_log, dict) and 'status' in last_log:
+        return last_log['status']
+    return None
+
+def extract_last_log_agent(logs_array):
+    """Extract agent ID of the last log entry"""
+    if not logs_array or not isinstance(logs_array, list) or len(logs_array) == 0:
+        return None
+    
+    last_log = logs_array[-1]  # Assuming logs are in chronological order
+    if isinstance(last_log, dict) and 'agent' in last_log:
+        return last_log['agent']
+    return None
+
+def extract_last_log_timestamp(logs_array):
+    """Extract timestamp of the last log entry"""
+    if not logs_array or not isinstance(logs_array, list) or len(logs_array) == 0:
+        return None
+    
+    last_log = logs_array[-1]  # Assuming logs are in chronological order
+    if isinstance(last_log, dict) and 'startedAt' in last_log:
+        return to_timestamp(last_log['startedAt'])
+    return None
+
+def extract_last_log_duration(logs_array):
+    """Extract duration of the last log entry"""
+    if not logs_array or not isinstance(logs_array, list) or len(logs_array) == 0:
+        return None
+    
+    last_log = logs_array[-1]  # Assuming logs are in chronological order
+    if isinstance(last_log, dict) and 'duration' in last_log:
+        return to_int(last_log['duration'])
+    return None
+
+def extract_total_duration(logs_array):
+    """Sum duration from all log entries"""
+    if not logs_array or not isinstance(logs_array, list):
+        return 0
+    
+    total = 0
+    for log in logs_array:
+        if isinstance(log, dict) and 'duration' in log:
+            try:
+                total += int(log['duration'])
+            except (ValueError, TypeError):
+                continue
+    return total
+
+def extract_call_count(logs_array):
+    """Count number of calls in logs"""
+    if not logs_array or not isinstance(logs_array, list):
+        return 0
+    
+    count = 0
+    for log in logs_array:
+        if isinstance(log, dict) and log.get('eventType') == 'call':
+            count += 1
+    return count
+
+def extract_email_count(logs_array):
+    """Count number of emails in logs"""
+    if not logs_array or not isinstance(logs_array, list):
+        return 0
+    
+    count = 0
+    for log in logs_array:
+        if isinstance(log, dict) and log.get('eventType') == 'email':
+            count += 1
+    return count
+
+def extract_sms_count(logs_array):
+    """Count number of SMS in logs"""
+    if not logs_array or not isinstance(logs_array, list):
+        return 0
+    
+    count = 0
+    for log in logs_array:
+        if isinstance(log, dict) and log.get('eventType') == 'sms':
+            count += 1
+    return count
+
+# Helper functions for retentions
+
+def extract_contact_channels_count(channels_array):
+    """Count number of contact channels"""
+    if not channels_array or not isinstance(channels_array, list):
+        return 0
+    return len(channels_array)
+
+def extract_contact_channels_list(channels_array):
+    """Extract comma-separated list of contact channels"""
+    if not channels_array or not isinstance(channels_array, list):
+        return ""
+    return ", ".join(str(channel) for channel in channels_array)
+
+def extract_reason_category(reason_obj):
+    """Extract category from reasonForPause object"""
+    if not reason_obj or not isinstance(reason_obj, dict):
+        return None
+    return reason_obj.get('category')
+
+def extract_reason_subcategory(reason_obj):
+    """Extract subcategory from reasonForPause object"""
+    if not reason_obj or not isinstance(reason_obj, dict):
+        return None
+    return reason_obj.get('subcategory')
+
+# Helper functions for notifications
+
+def extract_data_field(data_obj):
+    """Safely convert data object to string representation if present"""
+    if not data_obj or not isinstance(data_obj, dict):
+        return None
+    try:
+        return str(data_obj)  # Basic string representation
+    except:
+        return None
+
+def is_read(read_at):
+    """Determine if notification has been read based on readAt timestamp"""
+    return read_at is not None
 
 # --- Mapping Definitions ---
 
@@ -802,6 +957,130 @@ LEADS_ARCHIVE_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
+# Contacts-Logs mapping based on actual MongoDB structure (261 docs analyzed)
+CONTACTS_LOGS_MAPPING = {
+    # Primary Keys & Metadata
+    'pk_contact_log': ('_id', to_string),
+    'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
+    'des_data_origin': (Literal('contacts-logs'), None),
+
+    # Timestamps
+    'ts_created_at': ('createdAt', to_timestamp),
+    'ts_updated_at': ('updatedAt', to_timestamp),
+    
+    # Log Aggregations
+    'val_logs_count': ('logs', extract_logs_count),
+    'val_total_call_duration': ('logs', extract_total_duration),
+    'val_call_count': ('logs', extract_call_count),
+    'val_email_count': ('logs', extract_email_count),
+    'val_sms_count': ('logs', extract_sms_count),
+    
+    # Last Log Details
+    'ts_last_contact': ('logs', extract_last_log_timestamp),
+    'des_last_contact_type': ('logs', extract_last_log_type),
+    'des_last_contact_direction': ('logs', extract_last_log_direction),
+    'des_last_contact_status': ('logs', extract_last_log_status),
+    'val_last_contact_duration': ('logs', extract_last_log_duration),
+    'fk_last_contact_agent': ('logs', extract_last_log_agent),
+    
+    # Standard
+    'des_source': (Literal('mongo'), None),
+}
+
+# Retentions mapping based on actual MongoDB structure (189 docs analyzed)
+RETENTIONS_MAPPING = {
+    # Primary Keys & Metadata
+    'pk_retention': ('_id', to_string),
+    'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
+    'des_data_origin': (Literal('retentions'), None),
+
+    # Customer Reference
+    'fk_customer': ('cust', to_string),
+    
+    # Timestamps
+    'ts_created_at': ('createdAt', to_timestamp),
+    'ts_updated_at': ('updatedAt', to_timestamp),
+    'ts_assigned_at': ('assignedAt', to_timestamp),
+    'ts_paused_at': ('pausedAt', to_timestamp),
+    'ts_reactivated_at': ('reactivatedAt', to_timestamp),
+    'ts_contacted_at': ('contactedAt', to_timestamp),
+    'ts_appointment_at': ('appointmentAt', to_timestamp),
+    
+    # Status and Assignment
+    'des_retention_status': ('status', None),
+    'val_reassignment_count': ('reassignmentCount', to_int),
+    
+    # Contact Channels
+    'val_contact_channels_count': ('contactChannels', extract_contact_channels_count),
+    'txt_contact_channels': ('contactChannels', extract_contact_channels_list),
+    
+    # Pause Reason
+    'des_pause_reason_category': ('reasonForPause', extract_reason_category),
+    'des_pause_reason_subcategory': ('reasonForPause', extract_reason_subcategory),
+    
+    # System and Integration
+    'fk_sys_user': ('sysUser', None),
+    'cod_zendesk_ticket': ('zendeskTicketId', None),
+    
+    # Boolean Flags
+    'flg_reactivated_by_agent': ('isReactivatedByAgent', None),
+    'flg_retention_due_to_agent': ('isRetentionDueToAgent', None),
+    
+    # Standard
+    'des_source': (Literal('mongo'), None),
+}
+
+# Notifications mapping based on actual MongoDB structure (60 docs analyzed)
+NOTIFICATIONS_MAPPING = {
+    # Primary Keys & Metadata
+    'pk_notification': ('_id', to_string),
+    'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
+    'des_data_origin': (Literal('notifications'), None),
+
+    # Recipient Information
+    'fk_recipient': ('recipient', to_string),
+    'des_recipient_model': ('recipientModel', None),
+    
+    # Document Reference
+    'fk_document': ('docId', to_string),
+    'des_document_model': ('docModel', None),
+    
+    # Notification Details
+    'des_notification_type': ('notificationType', None),
+    'txt_data': ('data', extract_data_field),
+    
+    # Timestamps
+    'ts_created_at': ('createdAt', to_timestamp),
+    'ts_updated_at': ('updatedAt', to_timestamp),
+    'ts_read_at': ('readAt', to_timestamp),
+    
+    # Flags
+    'flg_is_read': ('readAt', is_read),
+    
+    # Standard
+    'des_source': (Literal('mongo'), None),
+}
+
+# Appointmnets mapping based on actual MongoDB structure (5 docs analyzed)
+APPOINTMENTS_MAPPING = {
+    # Primary Keys & Metadata
+    'pk_appointment': ('_id', to_string),
+    'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
+    'des_data_origin': (Literal('appointments'), None),
+
+    # References
+    'fk_sys_user': ('sysUserId', to_string),
+    'fk_lead': ('leadId', to_string),
+    
+    # Timestamps
+    'ts_created_at': ('createdAt', to_timestamp),
+    'ts_updated_at': ('updatedAt', to_timestamp),
+    'ts_starts_at': ('startsAt', to_timestamp),
+    
+    # Standard
+    'des_source': (Literal('mongo'), None),
+}
+
 MAPPINGS = {
     'customers': CUSTOMERS_MAPPING,
     'leads': LEADS_MAPPING,
@@ -811,5 +1090,9 @@ MAPPINGS = {
     'coupons': COUPONS_MAPPING,
     'users-metadata': USERS_METADATA_MAPPING,
     'leads-archive': LEADS_ARCHIVE_MAPPING,
+    'contacts-logs': CONTACTS_LOGS_MAPPING,
+    'retentions': RETENTIONS_MAPPING,
+    'notifications': NOTIFICATIONS_MAPPING,
+    'appointments': APPOINTMENTS_MAPPING,
 
 }

@@ -489,6 +489,130 @@ _leads_archive_schema = pa.schema([
     pa.field('des_source', pa.string()),
 ])
 
+# Contacts-logs schema - based on MongoDB field analysis (261 docs)
+_contacts_logs_schema = pa.schema([
+    # Primary Keys & Metadata
+    pa.field('pk_contact_log', pa.string()),  # 260/261 are strings, 1 objectId
+    pa.field('pk_yearmonth', pa.string()),
+    pa.field('des_data_origin', pa.string()),
+
+    # Timestamps
+    pa.field('ts_created_at', pa.timestamp('ns')),  # 260/261
+    pa.field('ts_updated_at', pa.timestamp('ns')),  # 260/261
+    
+    # Log Aggregations
+    pa.field('val_logs_count', pa.int64()),  # Number of log entries
+    pa.field('val_total_call_duration', pa.int64()),  # Total duration of all calls
+    pa.field('val_call_count', pa.int64()),  # Number of call events
+    pa.field('val_email_count', pa.int64()),  # Number of email events
+    pa.field('val_sms_count', pa.int64()),  # Number of SMS events
+    
+    # Last Log Details
+    pa.field('ts_last_contact', pa.timestamp('ns')),  # Timestamp of last contact
+    pa.field('des_last_contact_type', pa.string()),  # Type of last contact (call, email, sms)
+    pa.field('des_last_contact_direction', pa.string()),  # Direction of last contact (inbound, outbound)
+    pa.field('des_last_contact_status', pa.string()),  # Status of last contact (completed, hangup, etc.)
+    pa.field('val_last_contact_duration', pa.int64()),  # Duration of last contact
+    pa.field('fk_last_contact_agent', pa.string()),  # Agent ID for last contact
+    
+    # Standard
+    pa.field('des_source', pa.string()),
+])
+
+# Retentions schema - based on MongoDB field analysis (189 docs)
+_retentions_schema = pa.schema([
+    # Primary Keys & Metadata
+    pa.field('pk_retention', pa.string()),  # _id field (189/189)
+    pa.field('pk_yearmonth', pa.string()),
+    pa.field('des_data_origin', pa.string()),
+
+    # Customer Reference
+    pa.field('fk_customer', pa.string()),  # cust field (189/189)
+    
+    # Timestamps
+    pa.field('ts_created_at', pa.timestamp('ns')),  # createdAt (189/189)
+    pa.field('ts_updated_at', pa.timestamp('ns')),  # updatedAt (189/189)
+    pa.field('ts_assigned_at', pa.timestamp('ns')),  # assignedAt (189/189)
+    pa.field('ts_paused_at', pa.timestamp('ns')),  # pausedAt (189/189)
+    pa.field('ts_reactivated_at', pa.timestamp('ns')),  # reactivatedAt (39/189)
+    pa.field('ts_contacted_at', pa.timestamp('ns')),  # contactedAt (38/189)
+    pa.field('ts_appointment_at', pa.timestamp('ns')),  # appointmentAt (7/189)
+    
+    # Status and Assignment
+    pa.field('des_retention_status', pa.string()),  # status (189/189)
+    pa.field('val_reassignment_count', pa.int64()),  # reassignmentCount (189/189)
+    
+    # Contact Channels
+    pa.field('val_contact_channels_count', pa.int64()),  # count of contactChannels array (112/189)
+    pa.field('txt_contact_channels', pa.string()),  # comma-separated channels
+    
+    # Pause Reason
+    pa.field('des_pause_reason_category', pa.string()),  # from reasonForPause.category (45/189)
+    pa.field('des_pause_reason_subcategory', pa.string()),  # from reasonForPause.subcategory
+    
+    # System and Integration
+    pa.field('fk_sys_user', pa.string()),  # sysUser (25/189)
+    pa.field('cod_zendesk_ticket', pa.string()),  # zendeskTicketId (1/189)
+    
+    # Boolean Flags
+    pa.field('flg_reactivated_by_agent', pa.bool_()),  # isReactivatedByAgent (39/189)
+    pa.field('flg_retention_due_to_agent', pa.bool_()),  # isRetentionDueToAgent (39/189)
+    
+    # Standard
+    pa.field('des_source', pa.string()),
+])
+
+# Notifications schema - based on MongoDB field analysis (60 docs)
+_notifications_schema = pa.schema([
+    # Primary Keys & Metadata
+    pa.field('pk_notification', pa.string()),  # _id field (60/60)
+    pa.field('pk_yearmonth', pa.string()),
+    pa.field('des_data_origin', pa.string()),
+
+    # Recipient Information
+    pa.field('fk_recipient', pa.string()),  # recipient (60/60)
+    pa.field('des_recipient_model', pa.string()),  # recipientModel (60/60)
+    
+    # Document Reference
+    pa.field('fk_document', pa.string()),  # docId (58/60)
+    pa.field('des_document_model', pa.string()),  # docModel (58/60)
+    
+    # Notification Details
+    pa.field('des_notification_type', pa.string()),  # notificationType (60/60)
+    pa.field('txt_data', pa.string()),  # data as string representation (2/60)
+    
+    # Timestamps
+    pa.field('ts_created_at', pa.timestamp('ns')),  # createdAt (60/60)
+    pa.field('ts_updated_at', pa.timestamp('ns')),  # updatedAt (60/60)
+    pa.field('ts_read_at', pa.timestamp('ns')),  # readAt (60/60)
+    
+    # Flags
+    pa.field('flg_is_read', pa.bool_()),  # Derived from readAt
+    
+    # Standard
+    pa.field('des_source', pa.string()),
+])
+
+# Appointments schema - based on MongoDB field analysis (6 docs)
+_appointments_schema = pa.schema([
+    # Primary Keys & Metadata
+    pa.field('pk_appointment', pa.string()),  # _id field (6/6)
+    pa.field('pk_yearmonth', pa.string()),
+    pa.field('des_data_origin', pa.string()),
+
+    # References
+    pa.field('fk_sys_user', pa.string()),  # sysUserId (6/6)
+    pa.field('fk_lead', pa.string()),  # leadId (6/6)
+    
+    # Timestamps
+    pa.field('ts_created_at', pa.timestamp('ns')),  # createdAt (6/6)
+    pa.field('ts_updated_at', pa.timestamp('ns')),  # updatedAt (6/6)
+    pa.field('ts_starts_at', pa.timestamp('ns')),  # startsAt (6/6)
+    
+    # Standard
+    pa.field('des_source', pa.string()),
+])
+
 
 SCHEMAS = {
     'customers': _customers_schema,
@@ -499,5 +623,9 @@ SCHEMAS = {
     'coupons': _coupons_schema,
     'users_metadata': _users_metadata_schema,
     'leads_archive': _leads_archive_schema,
+    'contacts_logs': _contacts_logs_schema,
+    'retentions': _retentions_schema,
+    'notifications': _notifications_schema,
+    'appointments': _appointments_schema,
 
 }
