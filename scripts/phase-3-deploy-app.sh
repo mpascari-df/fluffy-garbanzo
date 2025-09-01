@@ -18,8 +18,8 @@ source "$CONFIG_FILE"
 
 # --- Configuration Validation ---
 # **Added KEEP_ALIVE_CLOUD_RUN_INGESTOR to validation**
-if [ -z "$PROJECT_ID" ] || [ -z "$PUBSUB_TOPIC_NAME" ] || [ -z "$MONGO_DB_NAME" ] || [ -z "$PUBLISHER_DLQ_TOPIC_NAME" ] || [ -z "$CLOUD_RUN_SERVICE_NAME" ] || [ -z "$REGION" ] || [ -z "$CLOUD_RUN_SA" ] || [ -z "$MONGO_URI" ] || [ -z "$KEEP_ALIVE_CLOUD_RUN_INGESTOR" ]; then
-    echo "ERROR: PROJECT_ID, PUBSUB_TOPIC_NAME, MONGO_DB_NAME, PUBLISHER_DLQ_TOPIC_NAME, CLOUD_RUN_SERVICE_NAME, REGION, CLOUD_RUN_SA, MONGO_URI, and KEEP_ALIVE_CLOUD_RUN_INGESTOR must be set in '$CONFIG_FILE'."
+if [ -z "$PROJECT_ID" ] || [ -z "$PUBSUB_TOPIC_NAME" ] || [ -z "$MONGO_DB_NAME" ] || [ -z "$PUBLISHER_DLQ_TOPIC_NAME" ] || [ -z "$CLOUD_RUN_SERVICE_NAME" ] || [ -z "$REGION" ] || [ -z "$CLOUD_RUN_SA" ] || [ -z "$MONGO_URI" ] || [ -z "$KEEP_ALIVE_CLOUD_RUN_INGESTOR" ] || [ -z "$VPC_CONNECTOR_NAME" ] || [ -z "$VPC_EGRESS_SETTING" ]; then
+    echo "ERROR: PROJECT_ID, PUBSUB_TOPIC_NAME, MONGO_DB_NAME, PUBLISHER_DLQ_TOPIC_NAME, CLOUD_RUN_SERVICE_NAME, REGION, CLOUD_RUN_SA, MONGO_URI, KEEP_ALIVE_CLOUD_RUN_INGESTOR, VPC_CONNECTOR_NAME, and VPC_EGRESS_SETTING must be set in '$CONFIG_FILE'."
     exit 1
 fi
 
@@ -33,6 +33,8 @@ echo "MongoDB Database:     $MONGO_DB_NAME"
 echo "Cloud Run Service:    $CLOUD_RUN_SERVICE_NAME"
 echo "Cloud Run SA:         $CLOUD_RUN_SA"
 echo "Keep Instance Alive:  $KEEP_ALIVE_CLOUD_RUN_INGESTOR" # **Added for clarity**
+echo "VPC Connector:        $VPC_CONNECTOR_NAME"
+echo "VPC Egress:           $VPC_EGRESS_SETTING"
 echo "---------------------------------"
 
 # Step 1: Enable necessary APIs
@@ -98,8 +100,11 @@ gcloud run deploy "$CLOUD_RUN_SERVICE_NAME" \
   --execution-environment=gen2 \
   --max-instances=1 \
   $MIN_INSTANCES_FLAG \
-  --set-env-vars "MONGO_DB_NAME=${MONGO_DB_NAME},PUBSUB_TOPIC_NAME=${PUBSUB_TOPIC_NAME},PROJECT_ID=${PROJECT_ID},PUBLISHER_DLQ_TOPIC_NAME=${PUBLISHER_DLQ_TOPIC_NAME},MONGO_URI_SECRET_ID=${MONGO_URI}" \
+  --set-env-vars "MONGO_DB_NAME=${MONGO_DB_NAME},PUBSUB_TOPIC_NAME=${PUBSUB_TOPIC_NAME},PROJECT_ID=${PROJECT_ID},PUBLISHER_DLQ_TOPIC_NAME=${PUBLISHER_DLQ_TOPIC_NAME}" \
+  --set-secrets="MONGO_URI=${MONGO_URI}:latest" \
   --port=8080 \
+  --vpc-connector="$VPC_CONNECTOR_NAME" \
+  --vpc-egress="$VPC_EGRESS_SETTING" \
   --cpu=1 \
   --memory=512Mi \
   # --startup-probe='path=/health,period=15,timeout=10,failure-threshold=3' # Temporarily disabled for deployment testing.

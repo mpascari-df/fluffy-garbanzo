@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 import pymongo
 from bson import json_util
 from google.cloud import pubsub_v1
-from google.cloud import secretmanager
 from flask import Flask, request
 
 # --- Configuration ---
@@ -24,20 +23,10 @@ PROJECT_ID = os.getenv("PROJECT_ID")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME")
 PUBSUB_TOPIC_NAME = os.getenv("PUBSUB_TOPIC_NAME")
 PUBSUB_DEAD_LETTER_TOPIC_NAME = os.getenv("PUBLISHER_DLQ_TOPIC_NAME")
-MONGO_URI_SECRET_ID = os.getenv("MONGO_URI_SECRET_ID")
-
-# --- Helper function to access Secret Manager ---
-def access_secret_version(project_id, secret_id, version_id="latest"):
-    """
-    Access the payload for the given secret version and return it.
-    """
-    client = secretmanager.SecretManagerServiceClient()
-    name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
-    response = client.access_secret_version(request={"name": name})
-    return response.payload.data.decode("UTF-8")
+# The MONGO_URI is now injected directly by Cloud Run as an environment variable.
+MONGO_URI = os.getenv("MONGO_URI")
 
 # --- Initialize clients ---
-MONGO_URI = access_secret_version(PROJECT_ID, MONGO_URI_SECRET_ID)
 mongo_client = pymongo.MongoClient(MONGO_URI)
 db = mongo_client[MONGO_DB_NAME]
 
