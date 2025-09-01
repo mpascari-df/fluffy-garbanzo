@@ -9,7 +9,7 @@ set -e
 # --- Sourcing Configuration ---
 # Ensure the config file exists and load it.
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-CONFIG_FILE="${SCRIPT_DIR}/config.sh"
+CONFIG_FILE="${SCRIPT_DIR}/config_prod.sh"
 
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "ERROR: Configuration file '$CONFIG_FILE' not found."

@@ -109,3 +109,5 @@ scripts/phase-5-deploy-dataflow-template.sh.bckp
 refactor-plan.md
 cloud-run-transformer/analysis.md
 roadmap-story-4.md
+scripts/config_prod.sh
+scripts/config_staging.sh
