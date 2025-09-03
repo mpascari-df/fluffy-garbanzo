@@ -327,6 +327,7 @@ _deliveries_schema = pa.schema([
     pa.field('ts_delivery_updated', pa.timestamp('ns')),  # All 4,171
     pa.field('ts_delivery_date_scheduled', pa.timestamp('ns')),  # All 4,171
     pa.field('ts_delivery_date_actual', pa.timestamp('ns')),  # All 4,171 (date field)
+    pa.field('ts_issue_solved_at', pa.timestamp('ns')),  # from issue.solvedAt
 
     # Delivery Status & Classification
     pa.field('des_delivery_status', pa.string()),  # All 4,171
@@ -404,6 +405,7 @@ _users_metadata_schema = pa.schema([
 
     # System Fields
     pa.field('val_version', pa.int64()),  # __v field, 11/3531
+    pa.field('flg_is_suspended', pa.bool_()),  # isSuspended flag
 
     # Standard fields
     pa.field('des_source', pa.string()),
@@ -549,6 +551,7 @@ _retentions_schema = pa.schema([
     # Pause Reason
     pa.field('des_pause_reason_category', pa.string()),  # from reasonForPause.category (45/189)
     pa.field('des_pause_reason_subcategory', pa.string()),  # from reasonForPause.subcategory
+    pa.field('val_comeback_probability', pa.float64()),  # from reasonForPause.comebackProbab
     
     # System and Integration
     pa.field('fk_sys_user', pa.string()),  # sysUser (25/189)
@@ -608,24 +611,396 @@ _appointments_schema = pa.schema([
     pa.field('ts_created_at', pa.timestamp('ns')),  # createdAt (6/6)
     pa.field('ts_updated_at', pa.timestamp('ns')),  # updatedAt (6/6)
     pa.field('ts_starts_at', pa.timestamp('ns')),  # startsAt (6/6)
+    pa.field('txt_notes', pa.string()),  # notes field (8.6% coverage)
     
     # Standard
     pa.field('des_source', pa.string()),
 ])
 
+# ================ NEW COLLECTIONS BELOW ==================
 
+# Changelogs schema - LARGEST collection (6.6M docs)
+# Universal audit trail for all entity changes
+_changelogs_schema = pa.schema([
+    # Primary Keys & Metadata
+    pa.field('pk_changelog', pa.string()),  # entity_id being tracked
+    pa.field('pk_yearmonth', pa.string()),
+    pa.field('des_data_origin', pa.string()),
+    
+    # Timestamps
+    pa.field('ts_created_at', pa.timestamp('ns')),
+    pa.field('ts_updated_at', pa.timestamp('ns')),
+    
+    # Entity tracking
+    pa.field('des_entity_type', pa.string()),  # Extracted from _id prefix (ord_, cust_, pay_, etc)
+    pa.field('fk_entity_id', pa.string()),  # The entity being tracked
+    
+    # Change log aggregations
+    pa.field('val_total_changes', pa.int64()),  # Total number of changes
+    pa.field('val_system_changes', pa.int64()),  # Changes by SYSTEM
+    pa.field('val_api_changes', pa.int64()),  # Changes by apikey01
+    pa.field('val_user_changes', pa.int64()),  # Changes by human users
+    
+    # Latest change info
+    pa.field('ts_last_change', pa.timestamp('ns')),
+    pa.field('des_last_change_actor', pa.string()),
+    pa.field('txt_last_change_key', pa.string()),
+    
+    # Most changed fields (top 3)
+    pa.field('txt_top_changed_fields', pa.string()),  # Comma-separated list
+    pa.field('val_unique_fields_changed', pa.int64()),  # Count of unique fields
+    
+    # Standard
+    pa.field('des_source', pa.string()),
+])
+
+# Orders-archive schema - Historical orders (789K docs)
+_orders_archive_schema = pa.schema([
+    # Primary Keys & Metadata
+    pa.field('pk_order', pa.string()),
+    pa.field('pk_yearmonth', pa.string()),
+    pa.field('des_data_origin', pa.string()),
+
+    # Order Identification
+    pa.field('fk_customer', pa.string()),  # custId
+    pa.field('cod_payment', pa.string()),  # payment reference
+    pa.field('des_full_name', pa.string()),  # 99.8% coverage
+    
+    # Timestamps
+    pa.field('ts_order_created', pa.timestamp('ns')),
+    pa.field('ts_order_updated', pa.timestamp('ns')),
+    pa.field('ts_delivery_date', pa.timestamp('ns')),
+    pa.field('ts_initial_date', pa.timestamp('ns')),  # Legacy field
+    
+    # Order Status & Classification
+    pa.field('des_order_status', pa.string()),
+    pa.field('des_country', pa.string()),
+    
+    # Address Information
+    pa.field('txt_address_line1', pa.string()),
+    pa.field('txt_address_line2', pa.string()),
+    pa.field('des_locality', pa.string()),
+    pa.field('cod_zip', pa.string()),
+    pa.field('des_address_country', pa.string()),
+    
+    # Contact Info
+    pa.field('des_email', pa.string()),  # 1.3% coverage
+    pa.field('des_phone', pa.string()),  # 1.3% coverage
+    
+    # Order Characteristics - Boolean Flags
+    pa.field('flg_is_trial', pa.bool_()),
+    pa.field('flg_is_secondary', pa.bool_()),
+    pa.field('flg_is_last_in_cycle', pa.bool_()),
+    pa.field('flg_is_additional', pa.bool_()),
+    pa.field('flg_is_first_renewal', pa.bool_()),
+    pa.field('flg_is_rescheduled', pa.bool_()),
+    pa.field('flg_is_express_delivery', pa.bool_()),
+    pa.field('flg_has_additional_ice_bags', pa.bool_()),
+    pa.field('flg_address_is_locked', pa.bool_()),
+    pa.field('flg_is_legacy', pa.bool_()),
+    pa.field('flg_was_moved', pa.bool_()),  # Legacy tracking
+    pa.field('flg_was_moved_back', pa.bool_()),  # Legacy tracking
+    pa.field('flg_was_reset', pa.bool_()),  # Legacy tracking
+    pa.field('flg_notification_sent', pa.bool_()),
+    
+    # Package Details (99% coverage)
+    pa.field('val_package_bag_count', pa.int64()),
+    pa.field('val_total_package_count', pa.int64()),
+    pa.field('val_total_weight_kg', pa.float64()),
+    
+    # Delivery Details (18% coverage)
+    pa.field('des_delivery_company', pa.string()),
+    pa.field('flg_delivery_has_issue', pa.bool_()),
+    
+    # Content - Simplified structure
+    pa.field('val_total_bags', pa.int64()),
+    pa.field('val_chicken_portions', pa.int64()),
+    pa.field('val_turkey_portions', pa.int64()),
+    
+    # Legacy fields
+    pa.field('des_locked_by', pa.string()),  # 0.1% coverage
+    pa.field('des_updated_by', pa.string()),  # 0.02% coverage
+    pa.field('val_delta_days', pa.int64()),
+    
+    # System Fields
+    pa.field('val_version', pa.int64()),  # __v field
+    
+    # Standard
+    pa.field('des_source', pa.string()),
+])
+
+# Payments-archive schema - Historical payments (563K docs)
+_payments_archive_schema = pa.schema([
+    # Primary Keys & Metadata
+    pa.field('pk_payment', pa.string()),
+    pa.field('pk_yearmonth', pa.string()),
+    pa.field('des_data_origin', pa.string()),
+
+    # Payment Identification & Linking
+    pa.field('fk_customer', pa.string()),  # custId
+    pa.field('val_linked_orders_count', pa.int64()),
+    pa.field('txt_linked_order_ids', pa.string()),
+    
+    # Timestamps
+    pa.field('ts_payment_date', pa.timestamp('ns')),
+    pa.field('ts_payment_created', pa.timestamp('ns')),
+    pa.field('ts_payment_updated', pa.timestamp('ns')),
+    pa.field('ts_initial_date', pa.timestamp('ns')),  # Legacy field
+    
+    # Payment Status & Processing
+    pa.field('des_payment_status', pa.string()),
+    pa.field('des_country', pa.string()),
+    pa.field('val_failed_attempts_count', pa.int64()),
+    pa.field('flg_first_attempt_failed', pa.bool_()),  # Legacy field
+    
+    # Financial Amounts
+    pa.field('imp_payment_amount', pa.float64()),
+    pa.field('imp_invoice_amount', pa.float64()),
+    pa.field('imp_discount_amount', pa.float64()),
+    pa.field('pct_discount_percent', pa.float64()),
+    pa.field('imp_extras_amount', pa.float64()),
+    pa.field('imp_shipping_amount', pa.float64()),
+    
+    # Stripe Integration (evolving coverage)
+    pa.field('fk_stripe_customer', pa.string()),  # 99.99%
+    pa.field('cod_stripe_payment_id', pa.string()),  # 63%
+    pa.field('cod_stripe_invoice_id', pa.string()),  # 23%
+    pa.field('cod_stripe_charge_id', pa.string()),  # 21%
+    
+    # Line Items (39% coverage - growing)
+    pa.field('val_line_items_count', pa.int64()),
+    pa.field('val_total_product_qty', pa.int64()),
+    pa.field('val_total_product_grams', pa.int64()),
+    pa.field('imp_line_items_total_amount', pa.float64()),
+    
+    # Payment Characteristics
+    pa.field('flg_is_trial', pa.bool_()),
+    pa.field('flg_is_first_renewal', pa.bool_()),
+    pa.field('flg_is_additional', pa.bool_()),
+    pa.field('flg_is_legacy', pa.bool_()),
+    pa.field('flg_was_moved', pa.bool_()),  # Legacy tracking
+    
+    # Optional Fields
+    pa.field('cod_coupon', pa.string()),  # 0.03%
+    pa.field('cod_invoice_code', pa.string()),  # 0.001%
+    
+    # System Fields
+    pa.field('val_version', pa.int64()),  # __v field
+    
+    # Standard
+    pa.field('des_source', pa.string()),
+])
+
+# Packages schema - Package preparation tracking (3,281 docs)
+_packages_schema = pa.schema([
+    # Primary Keys & Metadata
+    pa.field('pk_package', pa.string()),  # Sequential package ID like "3-005"
+    pa.field('pk_yearmonth', pa.string()),
+    pa.field('des_data_origin', pa.string()),
+    
+    # Package Identification
+    pa.field('fk_handler', pa.string()),  # Handler/staff member ID
+    
+    # Timestamps
+    pa.field('ts_created_at', pa.timestamp('ns')),
+    pa.field('ts_updated_at', pa.timestamp('ns')),
+    pa.field('ts_used_at', pa.timestamp('ns')),  # 95% coverage
+    
+    # Package Configuration
+    pa.field('val_bag_count', pa.int64()),  # Number of bags
+    pa.field('val_daily_grams', pa.int64()),  # Daily gram allocation
+    pa.field('flg_is_trial', pa.bool_()),  # 97% coverage
+    pa.field('flg_is_used', pa.bool_()),  # Derived from usedAt
+    
+    # Standard
+    pa.field('des_source', pa.string()),
+])
+
+# Engagement-histories schema - Customer engagement tracking (70K docs)
+_engagement_histories_schema = pa.schema([
+    # Primary Keys & Metadata
+    pa.field('pk_engagement', pa.string()),
+    pa.field('pk_yearmonth', pa.string()),
+    pa.field('des_data_origin', pa.string()),
+    
+    # Timestamps
+    pa.field('ts_created_at', pa.timestamp('ns')),
+    pa.field('ts_updated_at', pa.timestamp('ns')),
+    
+    # Customer Engagement
+    pa.field('flg_survey_engaged', pa.bool_()),  # from cust.tests.customerDataSurvey.isEngaged
+    pa.field('des_survey_value', pa.string()),  # A/B test value
+    
+    # Recommendation Data (often empty arrays)
+    pa.field('flg_has_daily_grams_recommendations', pa.bool_()),
+    pa.field('flg_has_menu_recommendations', pa.bool_()),
+    
+    # Standard
+    pa.field('des_source', pa.string()),
+])
+
+# Geocontext schema - IP geolocation mapping (89K docs)
+_geocontext_schema = pa.schema([
+    # Primary Keys & Metadata
+    pa.field('pk_geocontext', pa.string()),  # Date-based sequential ID
+    pa.field('pk_yearmonth', pa.string()),
+    pa.field('des_data_origin', pa.string()),
+    
+    # IP Range Data
+    pa.field('val_ip_range_start', pa.string()),  # fromIp numeric string
+    pa.field('val_ip_range_end', pa.string()),  # toIp numeric string
+    pa.field('des_country', pa.string()),  # Country code
+    
+    # Standard
+    pa.field('des_source', pa.string()),
+])
+
+# Invalid-phones schema - Phone blacklist (8K docs)
+_invalid_phones_schema = pa.schema([
+    # Primary Keys & Metadata
+    pa.field('pk_phone', pa.string()),  # Phone number as ID
+    pa.field('pk_yearmonth', pa.string()),
+    pa.field('des_data_origin', pa.string()),
+    
+    # Phone Data
+    pa.field('des_phone_number', pa.string()),  # The invalid phone
+    pa.field('des_country', pa.string()),  # Country code
+    pa.field('des_created_by', pa.string()),  # SYSTEM
+    
+    # Timestamps
+    pa.field('ts_created_at', pa.timestamp('ns')),
+    
+    # Standard
+    pa.field('des_source', pa.string()),
+])
+
+# Sysusers schema - System users (611 docs)
+_sysusers_schema = pa.schema([
+    # Primary Keys & Metadata
+    pa.field('pk_sysuser', pa.string()),  # System user ID
+    pa.field('pk_yearmonth', pa.string()),
+    pa.field('des_data_origin', pa.string()),
+    
+    # User Information
+    pa.field('des_given_name', pa.string()),
+    pa.field('des_family_name', pa.string()),
+    pa.field('des_email', pa.string()),
+    pa.field('des_country', pa.string()),
+    
+    # Timestamps
+    pa.field('ts_created_at', pa.timestamp('ns')),  # 99.8% coverage
+    pa.field('ts_updated_at', pa.timestamp('ns')),  # 99.7% coverage
+    pa.field('ts_last_session_at', pa.timestamp('ns')),  # 94.8% coverage
+    
+    # Roles and Permissions
+    pa.field('txt_roles', pa.string()),  # Comma-separated roles array
+    pa.field('des_role', pa.string()),  # Single role field (7% - legacy)
+    pa.field('txt_manages_countries', pa.string()),  # Comma-separated countries
+    
+    # Status and Features
+    pa.field('flg_is_suspended', pa.bool_()),  # 68.9% coverage
+    pa.field('flg_is_sales_available', pa.bool_()),  # from sales.isAvailable
+    pa.field('flg_has_sales_tracking', pa.bool_()),  # 45.3% have sales object
+    pa.field('flg_has_retentions', pa.bool_()),  # 5.4% have retentions
+    
+    # Standard
+    pa.field('des_source', pa.string()),
+])
+
+# Stats schema - Business intelligence data (4,314 docs)
+_stats_schema = pa.schema([
+    # Primary Keys & Metadata
+    pa.field('pk_stat', pa.string()),  # Stat record ID
+    pa.field('pk_yearmonth', pa.string()),
+    pa.field('des_data_origin', pa.string()),
+    
+    # Timestamps
+    pa.field('ts_created_at', pa.timestamp('ns')),
+    pa.field('ts_updated_at', pa.timestamp('ns')),
+    
+    # Time Period
+    pa.field('val_year', pa.int64()),  # 99% coverage
+    pa.field('val_month', pa.int64()),  # 99% coverage
+    
+    # Stat Type (extracted from _id pattern)
+    pa.field('des_stat_type', pa.string()),  # SALES-STATS, PICKING-STATS, etc
+    pa.field('fk_agent_or_handler', pa.string()),  # Agent or handler ID if applicable
+    pa.field('des_stat_country', pa.string()),  # Country if specified
+    
+    # Aggregated Metrics (simplified from complex nested structures)
+    pa.field('val_total_assigned_leads', pa.int64()),
+    pa.field('val_total_appointments', pa.int64()),
+    pa.field('val_total_sales', pa.int64()),
+    pa.field('val_total_not_answered', pa.int64()),
+    pa.field('val_total_not_interested', pa.int64()),
+    pa.field('val_total_orders', pa.int64()),
+    pa.field('val_total_packages', pa.int64()),
+    
+    # Performance Metrics
+    pa.field('pct_conversion_rate', pa.float64()),
+    pa.field('pct_retention_rate', pa.float64()),
+    pa.field('imp_average_sales', pa.float64()),
+    
+    # Standard
+    pa.field('des_source', pa.string()),
+])
+
+# Sysinfo schema - System configuration (7 docs)
+_sysinfo_schema = pa.schema([
+    # Primary Keys & Metadata
+    pa.field('pk_config', pa.string()),  # Configuration type ID
+    pa.field('pk_yearmonth', pa.string()),
+    pa.field('des_data_origin', pa.string()),
+    
+    # Timestamps
+    pa.field('ts_updated_at', pa.timestamp('ns')),
+    
+    # Configuration Type
+    pa.field('des_config_type', pa.string()),  # CONFIG, STOCKS, AVAILABLE-AGENTS, etc
+    
+    # Simplified representation of complex config
+    pa.field('flg_has_cron_settings', pa.bool_()),
+    pa.field('flg_has_email_settings', pa.bool_()),
+    pa.field('flg_has_sales_settings', pa.bool_()),
+    pa.field('flg_has_robot_settings', pa.bool_()),
+    pa.field('flg_has_stock_levels', pa.bool_()),
+    pa.field('flg_has_agent_lists', pa.bool_()),
+    
+    # Stock levels (when type is STOCKS)
+    pa.field('val_chicken_stock', pa.int64()),
+    pa.field('val_salmon_stock', pa.int64()),
+    pa.field('val_beef_stock', pa.int64()),
+    pa.field('val_turkey_stock', pa.int64()),
+    
+    # Standard
+    pa.field('des_source', pa.string()),
+])
+
+# Define the SCHEMAS dictionary with all collections
 SCHEMAS = {
+    # Existing implementations
     'customers': _customers_schema,
     'leads': _leads_schema,
     'orders': _orders_schema,
     'payments': _payments_schema,
     'deliveries': _deliveries_schema,
     'coupons': _coupons_schema,
-    'users_metadata': _users_metadata_schema,
-    'leads_archive': _leads_archive_schema,
-    'contacts_logs': _contacts_logs_schema,
+    'users_metadata': _users_metadata_schema,  # Fixed: was users-metadata
+    'leads_archive': _leads_archive_schema,  # Fixed: was leads-archive
+    'contacts_logs': _contacts_logs_schema,  # Fixed: was contacts-logs
     'retentions': _retentions_schema,
     'notifications': _notifications_schema,
     'appointments': _appointments_schema,
-
+    
+    # New implementations
+    'changelogs': _changelogs_schema,
+    'orders_archive': _orders_archive_schema,  # Fixed: was orders-archive
+    'payments_archive': _payments_archive_schema,  # Fixed: was payments-archive
+    'packages': _packages_schema,
+    'engagement_histories': _engagement_histories_schema,  # Fixed: was engagement-histories
+    'geocontext': _geocontext_schema,
+    'invalid_phones': _invalid_phones_schema,  # Fixed: was invalid-phones
+    'sysusers': _sysusers_schema,
+    'stats': _stats_schema,
+    'sysinfo': _sysinfo_schema,
 }
