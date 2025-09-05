@@ -9,11 +9,12 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from google.cloud import storage
+from google.cloud import logging
 from bson import json_util
 from flask import Flask, request
 
 from config.schema_mappings import get_collection_schema, get_available_collections, has_collection_support
-from config.transformer import apply_transformations, validate_transformation_result
+from config.transformer import apply_transformations
 
 # Configuration
 PROJECT_ID = os.getenv("PROJECT_ID")
@@ -28,10 +29,130 @@ if not GCS_PROCESSED_BUCKET_NAME:
 storage_client = storage.Client()
 app = Flask(__name__)
 
+# Initialize schema monitoring
+schema_monitor = None
+if PROJECT_ID:
+    try:
+        schema_monitor = logging.Client(project=PROJECT_ID).logger('schema-drift')
+        print("[MONITORING] Cloud Logging initialized for schema drift tracking")
+    except Exception as e:
+        print(f"[MONITORING] Warning: Could not initialize Cloud Logging: {e}")
+        schema_monitor = None
+
+
+class SchemaMonitor:
+    """Monitor and log schema drift events to Cloud Logging"""
+    
+    def __init__(self, project_id):
+        try:
+            self.logging_client = logging.Client(project=project_id)
+            self.logger = self.logging_client.logger('schema-drift')
+            self.enabled = True
+            print("[MONITOR] Schema monitoring enabled")
+        except Exception as e:
+            print(f"[MONITOR] Could not initialize monitoring: {e}")
+            self.enabled = False
+            self.logger = None
+    
+    def log_drift(self, collection, warnings, document_id=None):
+        """Log schema drift to Cloud Logging with structured data"""
+        if not self.enabled or not self.logger:
+            return
+            
+        try:
+            for warning in warnings:
+                severity = 'WARNING'
+                if 'CRITICAL' in warning:
+                    severity = 'ERROR'
+                elif 'DATA_QUALITY' in warning:
+                    severity = 'INFO'
+                elif 'TYPE_MISMATCH' in warning:
+                    severity = 'WARNING'
+                
+                log_entry = {
+                    'message': warning,
+                    'collection': collection,
+                    'severity': severity,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                
+                if document_id:
+                    log_entry['document_id'] = document_id
+                
+                self.logger.log_struct(log_entry, severity=severity)
+        except Exception as e:
+            print(f"[MONITOR] Failed to log to Cloud Logging: {e}")
+
+
+def validate_transformation_result(df, schema):
+    """
+    Validate and auto-fix DataFrame to match target schema.
+    Logs issues but continues processing.
+    
+    Returns:
+        tuple: (is_valid, fixed_df, warning_messages)
+    """
+    if df.empty:
+        return False, df, ["DataFrame is empty"]
+    
+    warnings = []
+    
+    try:
+        import pyarrow as pa
+        
+        schema_fields = {field.name: field for field in schema}
+        df_columns = set(df.columns)
+        
+        # Handle missing required fields - add with None values
+        missing_fields = set(schema_fields.keys()) - df_columns
+        if missing_fields:
+            for field_name in missing_fields:
+                df[field_name] = None
+                field_type = schema_fields[field_name].type
+                warnings.append(f"SCHEMA_DRIFT: Added missing field '{field_name}' ({field_type}) with None")
+        
+        # Log extra fields that will be dropped
+        extra_fields = df_columns - set(schema_fields.keys())
+        if extra_fields:
+            warnings.append(f"SCHEMA_DRIFT: Dropping unexpected fields: {extra_fields}")
+        
+        # Reorder columns to match schema exactly
+        df = df[[field.name for field in schema]]
+        
+        # Try to create PyArrow table with safe casting
+        try:
+            table = pa.Table.from_pandas(df, schema=schema, safe=True)
+            
+            # Log any type casting that occurred
+            for col_idx, field in enumerate(schema):
+                col = table.column(col_idx)
+                if col.null_count > 0:
+                    null_pct = (col.null_count / len(col)) * 100
+                    if null_pct > 50:
+                        warnings.append(f"DATA_QUALITY: Field '{field.name}' has {null_pct:.1f}% null values")
+                        
+        except pa.lib.ArrowTypeError as e:
+            warnings.append(f"TYPE_MISMATCH: {str(e)}")
+            # Try with safe=False to allow lossy casts
+            table = pa.Table.from_pandas(df, schema=schema, safe=False)
+            warnings.append("TYPE_MISMATCH: Applied lossy type casting to conform to schema")
+        
+        if warnings:
+            print(f"[SCHEMA_VALIDATION] Warnings detected: {len(warnings)}")
+            for warning in warnings:
+                print(f"  - {warning}")
+        
+        return True, df, warnings
+        
+    except Exception as e:
+        return False, df, [f"CRITICAL: Validation error: {e}"]
+
+
 class ParquetTransformer:
     def __init__(self, collection_name):
         self.collection_name = collection_name
         self.schema = get_collection_schema(collection_name)
+        self.monitor = SchemaMonitor(PROJECT_ID) if PROJECT_ID else None
         
         if not self.schema:
             raise ValueError(f"No schema found for collection: {collection_name}")
@@ -72,6 +193,7 @@ class ParquetTransformer:
     def transform_documents(self, documents):
         """
         Transforms raw documents into a schema-enforced PyArrow Table.
+        Resilient: logs issues but continues processing.
         """
         if not documents:
             print("[TRANSFORMATION] No documents received for transformation.")
@@ -81,6 +203,11 @@ class ParquetTransformer:
             documents = [documents]
         
         print(f"[TRANSFORMATION] Starting transformation for {len(documents)} documents in collection: {self.collection_name}")
+        
+        # Extract document ID for monitoring
+        doc_id = None
+        if documents and isinstance(documents[0], dict):
+            doc_id = documents[0].get('_id', 'unknown')
         
         # ==================== DEBUG LOGGING ====================
         # Log the structure of the first document to understand what we're dealing with
@@ -119,12 +246,12 @@ class ParquetTransformer:
         # ==================== END DEBUG LOGGING ====================
         
         try:
-            # 1. Normalize raw JSON documents into a flat pandas DataFrame.
+            # 1. Normalize raw JSON documents into a flat pandas DataFrame
             source_df = pd.json_normalize(documents)
             print(f"[TRANSFORMATION] Normalized to DataFrame with {source_df.shape[0]} rows and {source_df.shape[1]} columns")
             print(f"[TRANSFORMATION] DataFrame columns: {list(source_df.columns)[:10]}..." if len(source_df.columns) > 10 else f"[TRANSFORMATION] DataFrame columns: {list(source_df.columns)}")
             
-            # 2. Apply declarative field mappings and transformations.
+            # 2. Apply declarative field mappings and transformations
             transformed_df = apply_transformations(source_df, self.collection_name)
             
             if transformed_df.empty:
@@ -133,41 +260,103 @@ class ParquetTransformer:
             
             print(f"[TRANSFORMATION] After transformations: {transformed_df.shape[0]} rows and {transformed_df.shape[1]} columns")
             
-            # 3. Validate transformation result
-            is_valid, validation_message = validate_transformation_result(transformed_df, self.schema)
+            # 3. Validate and fix transformation result
+            is_valid, fixed_df, warnings = validate_transformation_result(transformed_df, self.schema)
+            
             if not is_valid:
-                print(f"[TRANSFORMATION] Validation failed: {validation_message}")
+                print(f"[TRANSFORMATION] CRITICAL: Cannot proceed even with fixes: {warnings}")
+                # Log to monitoring
+                if self.monitor:
+                    self.monitor.log_drift(self.collection_name, warnings, doc_id)
                 return None
             
-            print(f"[TRANSFORMATION] Validation successful: {validation_message}")
+            if warnings:
+                # Log warnings to monitoring system
+                print(f"[TRANSFORMATION] Processing with {len(warnings)} warnings")
+                if self.monitor:
+                    self.monitor.log_drift(self.collection_name, warnings, doc_id)
             
-            # 4. Convert to PyArrow Table with strict schema enforcement.
+            # 4. Convert to PyArrow Table
             try:
-                # Only include columns that exist in the schema
-                schema_fields = set(field.name for field in self.schema)
-                df_columns = set(transformed_df.columns)
-                columns_to_keep = list(schema_fields.intersection(df_columns))
+                # Use fixed DataFrame that has been aligned with schema
+                table = pa.Table.from_pandas(fixed_df, schema=self.schema, safe=False)
                 
-                if columns_to_keep:
-                    final_df = transformed_df[columns_to_keep]
-                    print(f"[TABLE_CREATION] Creating PyArrow Table with {len(columns_to_keep)} columns")
-                    table = pa.Table.from_pandas(final_df, schema=self.schema, safe=True)
-                    print(f"[TABLE_CREATION] SUCCESS: Created PyArrow Table for {self.collection_name} with {table.num_rows} rows and {table.num_columns} columns")
-                    return table
-                else:
-                    print(f"[TABLE_CREATION] ERROR: No matching columns found between DataFrame and schema for collection: {self.collection_name}")
-                    return None
+                print(f"[TABLE_CREATION] SUCCESS: Created PyArrow Table for {self.collection_name}")
+                print(f"  - Rows: {table.num_rows}, Columns: {table.num_columns}")
+                if warnings:
+                    print(f"  - Schema drift detected: {len(warnings)} issues logged")
+                
+                # Add metadata about schema drift to the table
+                if warnings:
+                    metadata = {
+                        b'schema_drift_count': str(len(warnings)).encode(),
+                        b'schema_drift_summary': '; '.join(warnings[:3]).encode()  # First 3 warnings
+                    }
+                    existing_metadata = table.schema.metadata or {}
+                    combined_metadata = {**existing_metadata, **metadata}
+                    table = table.replace_schema_metadata(combined_metadata)
+                
+                return table
+                
+            except Exception as e:
+                print(f"[TABLE_CREATION] FALLBACK: Error creating table, attempting recovery: {e}")
+                fallback_warning = f"CRITICAL: Table creation failed, attempting recovery: {str(e)}"
+                if self.monitor:
+                    self.monitor.log_drift(self.collection_name, [fallback_warning], doc_id)
+                
+                # Last resort: try to save what we can
+                try:
+                    # Drop problematic columns one by one until it works
+                    working_df = fixed_df.copy()
+                    dropped_columns = []
                     
-            except (pa.ArrowTypeError, pa.ArrowInvalid) as e:
-                print(f"[TABLE_CREATION] ERROR: Failed to convert DataFrame to PyArrow Table for collection '{self.collection_name}'")
-                print(f"[TABLE_CREATION] Schema enforcement failed: {e}")
-                print(f"[TABLE_CREATION] DataFrame dtypes: {transformed_df.dtypes}")
+                    for col in fixed_df.columns:
+                        try:
+                            test_df = working_df[[col]]
+                            pa.Table.from_pandas(test_df, schema=pa.schema([field for field in self.schema if field.name == col]))
+                        except:
+                            print(f"[TABLE_CREATION] Dropping problematic column: {col}")
+                            dropped_columns.append(col)
+                            working_df = working_df.drop(columns=[col])
+                    
+                    if not working_df.empty:
+                        partial_schema = pa.schema([field for field in self.schema if field.name in working_df.columns])
+                        table = pa.Table.from_pandas(working_df, schema=partial_schema)
+                        
+                        success_msg = f"PARTIAL SUCCESS: Saved {len(working_df.columns)}/{len(fixed_df.columns)} columns"
+                        print(f"[TABLE_CREATION] {success_msg}")
+                        
+                        if dropped_columns and self.monitor:
+                            drop_warning = f"RECOVERY: Dropped columns due to errors: {dropped_columns}"
+                            self.monitor.log_drift(self.collection_name, [drop_warning], doc_id)
+                        
+                        # Add recovery metadata
+                        metadata = {
+                            b'recovery_mode': b'true',
+                            b'dropped_columns': ','.join(dropped_columns).encode(),
+                            b'original_column_count': str(len(fixed_df.columns)).encode()
+                        }
+                        table = table.replace_schema_metadata(metadata)
+                        
+                        return table
+                except Exception as recovery_error:
+                    print(f"[TABLE_CREATION] RECOVERY FAILED: {recovery_error}")
+                    if self.monitor:
+                        self.monitor.log_drift(self.collection_name, 
+                                              [f"CRITICAL: Recovery failed: {str(recovery_error)}"], 
+                                              doc_id)
+                
                 return None
                 
         except Exception as e:
             print(f"[TRANSFORMATION] CRITICAL ERROR: Transformation failed for collection '{self.collection_name}': {e}")
             import traceback
             print(f"[TRANSFORMATION] Traceback: {traceback.format_exc()}")
+            
+            if self.monitor:
+                self.monitor.log_drift(self.collection_name, 
+                                      [f"CRITICAL: Complete transformation failure: {str(e)}"], 
+                                      doc_id)
             return None
     
     def generate_output_path(self, operation="unknown"):
@@ -179,6 +368,7 @@ class ParquetTransformer:
         random_prefix = uuid.uuid4().hex[:8]
         
         return f"processed/{self.collection_name}/{random_prefix}-{date_path}/{operation}_{timestamp}_{unique_id}.parquet"
+
 
 def process_pubsub_message_to_parquet(message_data):
     """Process Pub/Sub message and convert to parquet"""
@@ -341,6 +531,7 @@ def process_pubsub_message_to_parquet(message_data):
         print(f"[PROCESS_MESSAGE] Traceback: {traceback.format_exc()}")
         raise
 
+
 @app.route("/", methods=["POST"])
 def handle_pubsub():
     """Handle Pub/Sub push messages"""
@@ -445,17 +636,23 @@ def handle_pubsub():
         print(f"[PUBSUB_HANDLER] Traceback: {traceback.format_exc()}")
         return f"Internal Server Error: {str(e)}", 500
 
+
 @app.route("/health")
 def health_check():
     """Health check endpoint"""
     available_collections = get_available_collections()
+    monitor_status = "enabled" if (schema_monitor and getattr(schema_monitor, 'enabled', False)) else "disabled"
+    
     return {
         "status": "healthy",
         "service": "cloud-run-transformer",
         "available_collections": available_collections,
         "project_id": PROJECT_ID,
-        "gcs_bucket": GCS_PROCESSED_BUCKET_NAME
+        "gcs_bucket": GCS_PROCESSED_BUCKET_NAME,
+        "schema_monitoring": monitor_status,
+        "resilience_mode": "enabled"
     }, 200
+
 
 @app.route("/debug")
 def debug_info():
@@ -470,17 +667,29 @@ def debug_info():
             "field_names": [field.name for field in schema] if schema else []
         }
     
+    monitor_status = "enabled" if (schema_monitor and getattr(schema_monitor, 'enabled', False)) else "disabled"
+    
     return {
         "service": "cloud-run-transformer",
         "project_id": PROJECT_ID,
         "gcs_processed_bucket": GCS_PROCESSED_BUCKET_NAME,
         "available_collections": available_collections,
-        "schemas": schemas_info
+        "schemas": schemas_info,
+        "schema_monitoring": monitor_status,
+        "resilience_features": {
+            "auto_fill_missing_fields": True,
+            "drop_unexpected_fields": True,
+            "lossy_type_casting": True,
+            "partial_recovery_mode": True,
+            "cloud_logging_integration": monitor_status == "enabled"
+        }
     }
+
 
 if __name__ == "__main__":
     print("[STARTUP] Starting Cloud Run Transformer Service...")
     print(f"[STARTUP] Available collections: {get_available_collections()}")
     print(f"[STARTUP] PROJECT_ID: {PROJECT_ID}")
     print(f"[STARTUP] GCS_PROCESSED_BUCKET_NAME: {GCS_PROCESSED_BUCKET_NAME}")
+    print("[STARTUP] Resilience mode: ENABLED - Will continue processing despite schema drift")
     app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
