@@ -1,6 +1,7 @@
 """
 Transformation module that applies field mappings and transformations
 to convert raw MongoDB documents into the target schema format.
+UPDATED: Added resilient validation that logs issues but continues processing.
 """
 
 import pandas as pd
@@ -142,37 +143,114 @@ def apply_transformations(source_df, collection_name):
 
 def validate_transformation_result(df, schema):
     """
-    Validate that the transformed DataFrame can be converted to the target schema.
+    Validate and auto-fix DataFrame to match target schema.
+    Logs issues but continues processing - prioritizing data capture over perfection.
     
     Args:
         df (pd.DataFrame): Transformed DataFrame
         schema (pyarrow.Schema): Target PyArrow schema
         
     Returns:
-        tuple: (is_valid, error_message)
+        tuple: (is_valid, fixed_df, warning_messages)
     """
     if df.empty:
-        return False, "DataFrame is empty"
+        return False, df, ["DataFrame is empty"]
+    
+    warnings = []
     
     try:
         import pyarrow as pa
         
-        # Check if all required schema fields are present
-        schema_fields = set(field.name for field in schema)
-        df_columns = set(df.columns)
+        # Create a copy to avoid modifying the original
+        fixed_df = df.copy()
         
-        missing_fields = schema_fields - df_columns
-        extra_fields = df_columns - schema_fields
+        schema_fields = {field.name: field for field in schema}
+        df_columns = set(fixed_df.columns)
         
+        # Handle missing required fields - add with None values
+        missing_fields = set(schema_fields.keys()) - df_columns
         if missing_fields:
-            return False, f"Missing required fields: {missing_fields}"
+            for field_name in missing_fields:
+                fixed_df[field_name] = None
+                field_type = schema_fields[field_name].type
+                warnings.append(f"SCHEMA_DRIFT: Added missing field '{field_name}' ({field_type}) with None")
         
+        # Log extra fields that will be dropped
+        extra_fields = df_columns - set(schema_fields.keys())
         if extra_fields:
-            print(f"Warning: Extra fields will be ignored: {extra_fields}")
+            warnings.append(f"SCHEMA_DRIFT: Dropping unexpected fields: {extra_fields}")
         
-        # Try to create a PyArrow table to validate types
-        table = pa.Table.from_pandas(df, schema=schema, safe=False)
-        return True, "Validation successful"
+        # Reorder columns to match schema exactly and drop extra fields
+        fixed_df = fixed_df[[field.name for field in schema]]
+        
+        # Try to create PyArrow table with safe casting first
+        validation_success = False
+        try:
+            table = pa.Table.from_pandas(fixed_df, schema=schema, safe=True)
+            validation_success = True
+            
+            # Log any data quality issues
+            for col_idx, field in enumerate(schema):
+                col = table.column(col_idx)
+                if col.null_count > 0:
+                    null_pct = (col.null_count / len(col)) * 100
+                    if null_pct > 50:
+                        warnings.append(f"DATA_QUALITY: Field '{field.name}' has {null_pct:.1f}% null values")
+                        
+        except pa.lib.ArrowTypeError as e:
+            # Type mismatch - try to fix with lossy casting
+            warnings.append(f"TYPE_MISMATCH: {str(e)[:200]}")  # Truncate long error messages
+            
+            try:
+                # Try with safe=False to allow lossy casts
+                table = pa.Table.from_pandas(fixed_df, schema=schema, safe=False)
+                warnings.append("Applied lossy type casting to conform to schema")
+                validation_success = True
+            except Exception as cast_error:
+                # Even lossy casting failed - try to fix column by column
+                warnings.append(f"LOSSY_CAST_FAILED: {str(cast_error)[:200]}")
+                
+                # Identify and fix problematic columns
+                for field in schema:
+                    if field.name in fixed_df.columns:
+                        try:
+                            # Try to cast this specific column
+                            test_series = fixed_df[field.name]
+                            if field.type == pa.string():
+                                fixed_df[field.name] = test_series.astype(str, errors='ignore')
+                            elif field.type == pa.int64():
+                                fixed_df[field.name] = pd.to_numeric(test_series, errors='coerce')
+                            elif field.type == pa.float64():
+                                fixed_df[field.name] = pd.to_numeric(test_series, errors='coerce')
+                            elif field.type == pa.bool_():
+                                fixed_df[field.name] = test_series.astype(bool, errors='ignore')
+                            # Add more type handling as needed
+                        except Exception as col_error:
+                            # If casting fails, set to None
+                            warnings.append(f"COLUMN_CAST_FAILED: '{field.name}' - setting to None")
+                            fixed_df[field.name] = None
+                
+                # Try one more time after individual column fixes
+                try:
+                    table = pa.Table.from_pandas(fixed_df, schema=schema, safe=False)
+                    warnings.append("Fixed problematic columns individually")
+                    validation_success = True
+                except Exception as final_error:
+                    warnings.append(f"CRITICAL: Final validation failed: {str(final_error)[:200]}")
+                    validation_success = False
+        
+        if warnings:
+            print(f"[SCHEMA_VALIDATION] Warnings detected: {len(warnings)}")
+            for warning in warnings[:10]:  # Limit console output to first 10 warnings
+                print(f"  - {warning}")
+            if len(warnings) > 10:
+                print(f"  ... and {len(warnings) - 10} more warnings")
+        else:
+            print("[SCHEMA_VALIDATION] Clean validation - no issues detected")
+        
+        return validation_success, fixed_df, warnings
         
     except Exception as e:
-        return False, f"Schema validation failed: {e}"
+        error_msg = f"Critical validation error: {str(e)[:500]}"
+        print(f"[SCHEMA_VALIDATION] {error_msg}")
+        return False, df, [error_msg]
