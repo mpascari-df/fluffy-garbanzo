@@ -7,6 +7,103 @@ class Literal:
     def __init__(self, value):
         self.value = value
 
+# ============================================================================
+# UNIVERSAL ARRAY HANDLER - FIX FOR WIDESPREAD ARRAY ISSUES
+# ============================================================================
+def safe_extract(value, default=None):
+    """
+    Universal extractor that safely handles fields that might be:
+    - Single values
+    - Arrays/lists
+    - None/null
+    - Empty strings
+    
+    This addresses the widespread "ambiguous truth value" errors across multiple collections.
+    
+    Args:
+        value: The value to extract (might be single value or array)
+        default: Default value to return if extraction fails
+        
+    Returns:
+        The extracted value or default
+    """
+    if value is None:
+        return default
+    
+    # Handle arrays/lists - take first non-empty value
+    if isinstance(value, (list, tuple)):
+        for val in value:
+            if val is not None and val != '':
+                return val
+        return default
+    
+    # Handle empty strings
+    if value == '':
+        return default
+    
+    return value
+
+def safe_nested_extract(obj, path, default=None):
+    """
+    Safely extract nested values that might be arrays at any level.
+    
+    Args:
+        obj: The source object
+        path: Dot-separated path (e.g., 'subscription.status')
+        default: Default value if extraction fails
+        
+    Returns:
+        The extracted value with array handling at each level
+    """
+    if not path or not isinstance(obj, dict):
+        return default
+    
+    keys = path.split('.')
+    current = obj
+    
+    for key in keys:
+        if isinstance(current, dict) and key in current:
+            current = current[key]
+            # Apply safe_extract at each level to handle potential arrays
+            current = safe_extract(current)
+            if current is None:
+                return default
+        else:
+            return default
+    
+    return current
+
+# ============================================================================
+# TYPE CONVERSION WRAPPERS WITH SAFE EXTRACTION
+# ============================================================================
+def safe_to_string(value):
+    """Safely extract and convert to string"""
+    extracted = safe_extract(value)
+    return to_string(extracted)
+
+def safe_to_int(value):
+    """Safely extract and convert to int"""
+    extracted = safe_extract(value)
+    return to_int(extracted)
+
+def safe_to_float(value):
+    """Safely extract and convert to float"""
+    extracted = safe_extract(value)
+    return to_float(extracted)
+
+def safe_to_bool(value):
+    """Safely extract and convert to bool"""
+    extracted = safe_extract(value)
+    return to_bool(extracted)
+
+def safe_to_timestamp(value):
+    """Safely extract and convert to timestamp"""
+    extracted = safe_extract(value)
+    return to_timestamp(extracted)
+
+# ============================================================================
+# ORIGINAL TYPE CONVERSION HELPERS
+# ============================================================================
 def to_timestamp(date_str):
     """Safely converts an ISO 8601 string to a datetime object."""
     if not date_str:
@@ -17,7 +114,6 @@ def to_timestamp(date_str):
             date_str = date_str[:-1] + '+00:00'
         return datetime.fromisoformat(date_str)
     except (ValueError, TypeError):
-        # Return None if the date string is malformed or not a string
         return None
 
 def to_int(val):
@@ -52,6 +148,11 @@ def to_bool(val):
         return val
     return bool(val)
 
+# ============================================================================
+# COLLECTION-SPECIFIC HELPER FUNCTIONS
+# ============================================================================
+
+# --- Customers/Leads Helpers ---
 def count_array_items(arr):
     """Count items in an array field"""
     if arr is None or not isinstance(arr, list):
@@ -93,33 +194,12 @@ def get_latest_comment_date(comments_array):
                 continue
     return latest_date
 
-# FIX 3: Helper function for stripeCustId array handling
-def extract_stripe_customer_id(stripe_cust_id):
-    """
-    Extract Stripe Customer ID from field that might be a string or array.
-    If array, takes the first non-null value.
-    
-    This handles the case where subscription.stripeCustId is sometimes an array
-    instead of a single value, which was causing "ambiguous truth value" errors.
-    """
-    if stripe_cust_id is None:
-        return None
-    
-    # If it's a list/array
-    if isinstance(stripe_cust_id, (list, tuple)):
-        # Return first non-null, non-empty value if exists
-        for val in stripe_cust_id:
-            if val is not None and val != '':
-                return str(val)
-        return None
-    
-    # If it's already a string or other single value
-    if stripe_cust_id == '':
-        return None
-    
-    return str(stripe_cust_id)
+def check_has_acquisition(acquisition_obj):
+    """Check if acquisition object exists and has data"""
+    acquisition_obj = safe_extract(acquisition_obj)
+    return acquisition_obj is not None and isinstance(acquisition_obj, dict)
 
-# Helper functions for orders
+# --- Orders Helpers ---
 def extract_bag_totals(content_obj):
     """Extract total bags from content.bagList structure"""
     if not content_obj or not isinstance(content_obj, dict):
@@ -186,7 +266,7 @@ def count_additional_extras(content_obj):
     extras = content_obj.get('additionalExtras', [])
     return len(extras) if isinstance(extras, list) else 0
 
-# Helper functions for payments
+# --- Payments Helpers ---
 def extract_line_items_count(line_items):
     """Count line items"""
     if not line_items or not isinstance(line_items, list):
@@ -320,35 +400,37 @@ def extract_latest_refund_reason(refunds_array):
         return latest_refund['reason'].get('category')
     return None
 
-# Helper functions for deliveries
+# --- Deliveries Helpers ---
 def has_label_data(label_data):
     """Check if labelData exists and is not empty"""
+    label_data = safe_extract(label_data)
     return label_data is not None and len(str(label_data)) > 0
 
 def get_label_data_length(label_data):
     """Get length of labelData string"""
+    label_data = safe_extract(label_data)
     if label_data is None:
         return 0
     return len(str(label_data))
 
-# Helper functions for leads-archive
+# --- Leads Archive Helpers ---
 def extract_sales_status(sales_obj):
     """Extract status from sales object"""
     if not sales_obj or not isinstance(sales_obj, dict):
         return None
-    return sales_obj.get('status')
+    return safe_extract(sales_obj.get('status'))
 
 def extract_sales_assigned_at(sales_obj):
     """Extract assignedAt timestamp from sales object"""
     if not sales_obj or not isinstance(sales_obj, dict):
         return None
-    return to_timestamp(sales_obj.get('assignedAt'))
+    return safe_to_timestamp(sales_obj.get('assignedAt'))
 
 def extract_sales_reassignment_count(sales_obj):
     """Extract reassignmentCount from sales object"""
     if not sales_obj or not isinstance(sales_obj, dict):
         return 0
-    return to_int(sales_obj.get('reassignmentCount', 0))
+    return safe_to_int(sales_obj.get('reassignmentCount', 0)) or 0
 
 def extract_sales_comments_count(sales_obj):
     """Count comments from sales object"""
@@ -357,7 +439,7 @@ def extract_sales_comments_count(sales_obj):
     comments = sales_obj.get('comments', [])
     return len(comments) if isinstance(comments, list) else 0
 
-# Helper functions for contacts-logs
+# --- Contacts Logs Helpers ---
 def extract_logs_count(logs_array):
     """Count number of communication logs"""
     if not logs_array or not isinstance(logs_array, list):
@@ -371,7 +453,7 @@ def extract_last_log_type(logs_array):
     
     last_log = logs_array[-1]
     if isinstance(last_log, dict) and 'eventType' in last_log:
-        return last_log['eventType']
+        return safe_extract(last_log['eventType'])
     return None
 
 def extract_last_log_direction(logs_array):
@@ -381,7 +463,7 @@ def extract_last_log_direction(logs_array):
     
     last_log = logs_array[-1]
     if isinstance(last_log, dict) and 'direction' in last_log:
-        return last_log['direction']
+        return safe_extract(last_log['direction'])
     return None
 
 def extract_last_log_status(logs_array):
@@ -391,7 +473,7 @@ def extract_last_log_status(logs_array):
     
     last_log = logs_array[-1]
     if isinstance(last_log, dict) and 'status' in last_log:
-        return last_log['status']
+        return safe_extract(last_log['status'])
     return None
 
 def extract_last_log_agent(logs_array):
@@ -401,7 +483,7 @@ def extract_last_log_agent(logs_array):
     
     last_log = logs_array[-1]
     if isinstance(last_log, dict) and 'agent' in last_log:
-        return last_log['agent']
+        return safe_extract(last_log['agent'])
     return None
 
 def extract_last_log_timestamp(logs_array):
@@ -411,7 +493,7 @@ def extract_last_log_timestamp(logs_array):
     
     last_log = logs_array[-1]
     if isinstance(last_log, dict) and 'startedAt' in last_log:
-        return to_timestamp(last_log['startedAt'])
+        return safe_to_timestamp(last_log['startedAt'])
     return None
 
 def extract_last_log_duration(logs_array):
@@ -421,7 +503,7 @@ def extract_last_log_duration(logs_array):
     
     last_log = logs_array[-1]
     if isinstance(last_log, dict) and 'duration' in last_log:
-        return to_int(last_log['duration'])
+        return safe_to_int(last_log['duration'])
     return None
 
 def extract_total_duration(logs_array):
@@ -433,7 +515,7 @@ def extract_total_duration(logs_array):
     for log in logs_array:
         if isinstance(log, dict) and 'duration' in log:
             try:
-                total += int(log['duration'])
+                total += int(safe_extract(log['duration'], 0))
             except (ValueError, TypeError):
                 continue
     return total
@@ -445,7 +527,7 @@ def extract_call_count(logs_array):
     
     count = 0
     for log in logs_array:
-        if isinstance(log, dict) and log.get('eventType') == 'call':
+        if isinstance(log, dict) and safe_extract(log.get('eventType')) == 'call':
             count += 1
     return count
 
@@ -456,7 +538,7 @@ def extract_email_count(logs_array):
     
     count = 0
     for log in logs_array:
-        if isinstance(log, dict) and log.get('eventType') == 'email':
+        if isinstance(log, dict) and safe_extract(log.get('eventType')) == 'email':
             count += 1
     return count
 
@@ -467,11 +549,11 @@ def extract_sms_count(logs_array):
     
     count = 0
     for log in logs_array:
-        if isinstance(log, dict) and log.get('eventType') == 'sms':
+        if isinstance(log, dict) and safe_extract(log.get('eventType')) == 'sms':
             count += 1
     return count
 
-# Helper functions for retentions
+# --- Retentions Helpers ---
 def extract_contact_channels_count(channels_array):
     """Count number of contact channels"""
     if not channels_array or not isinstance(channels_array, list):
@@ -482,35 +564,36 @@ def extract_contact_channels_list(channels_array):
     """Extract comma-separated list of contact channels"""
     if not channels_array or not isinstance(channels_array, list):
         return ""
-    return ", ".join(str(channel) for channel in channels_array)
+    return ", ".join(str(safe_extract(channel)) for channel in channels_array if safe_extract(channel))
 
 def extract_reason_category(reason_obj):
     """Extract category from reasonForPause object"""
     if not reason_obj or not isinstance(reason_obj, dict):
         return None
-    return reason_obj.get('category')
+    return safe_extract(reason_obj.get('category'))
 
 def extract_reason_subcategory(reason_obj):
     """Extract subcategory from reasonForPause object"""
     if not reason_obj or not isinstance(reason_obj, dict):
         return None
-    return reason_obj.get('subcategory')
+    return safe_extract(reason_obj.get('subcategory'))
 
 def extract_comeback_probability(reason_obj):
     """Extract comeback probability from reasonForPause object"""
     if not reason_obj or not isinstance(reason_obj, dict):
         return None
     prob = reason_obj.get('comebackProbab')
-    return to_float(prob) if prob is not None else None
+    return safe_to_float(prob) if prob is not None else None
 
-# Helper functions for notifications
+# --- Notifications Helpers ---
 def is_read(read_at):
     """Determine if notification has been read based on readAt timestamp"""
-    return read_at is not None
+    return safe_extract(read_at) is not None
 
-# Changelogs helpers
+# --- Changelogs Helpers ---
 def extract_entity_type(entity_id):
     """Extract entity type from ID prefix (ord_, cust_, pay_, etc)"""
+    entity_id = safe_extract(entity_id)
     if not entity_id or not isinstance(entity_id, str):
         return "unknown"
     
@@ -529,7 +612,7 @@ def count_changes_by_actor(logs_array, actor_name):
     
     count = 0
     for log in logs_array:
-        if isinstance(log, dict) and log.get('updatedBy') == actor_name:
+        if isinstance(log, dict) and safe_extract(log.get('updatedBy')) == actor_name:
             count += 1
     return count
 
@@ -540,14 +623,14 @@ def get_latest_change_info(logs_array):
     
     # Sort by createdAt to get latest
     sorted_logs = sorted(logs_array, 
-                        key=lambda x: x.get('createdAt', ''), 
+                        key=lambda x: safe_extract(x.get('createdAt', '')), 
                         reverse=True)
     
     if sorted_logs:
         latest = sorted_logs[0]
-        return (to_timestamp(latest.get('createdAt')),
-                latest.get('updatedBy'),
-                latest.get('key'))
+        return (safe_to_timestamp(latest.get('createdAt')),
+                safe_extract(latest.get('updatedBy')),
+                safe_extract(latest.get('key')))
     
     return None, None, None
 
@@ -559,8 +642,9 @@ def extract_top_changed_fields(logs_array, top_n=3):
     field_counts = {}
     for log in logs_array:
         if isinstance(log, dict) and 'key' in log:
-            key = log['key']
-            field_counts[key] = field_counts.get(key, 0) + 1
+            key = safe_extract(log['key'])
+            if key:
+                field_counts[key] = field_counts.get(key, 0) + 1
     
     if not field_counts:
         return ""
@@ -577,13 +661,16 @@ def count_unique_fields(logs_array):
     unique_fields = set()
     for log in logs_array:
         if isinstance(log, dict) and 'key' in log:
-            unique_fields.add(log['key'])
+            key = safe_extract(log['key'])
+            if key:
+                unique_fields.add(key)
     
     return len(unique_fields)
 
-# Stats helpers
+# --- Stats Helpers ---
 def extract_stat_type(stat_id):
     """Extract stat type from ID pattern"""
+    stat_id = safe_extract(stat_id)
     if not stat_id or not isinstance(stat_id, str):
         return "unknown"
     
@@ -598,6 +685,7 @@ def extract_stat_type(stat_id):
 
 def extract_agent_from_stat_id(stat_id):
     """Extract agent/handler ID from stat ID"""
+    stat_id = safe_extract(stat_id)
     if not stat_id or not isinstance(stat_id, str):
         return None
     
@@ -606,12 +694,12 @@ def extract_agent_from_stat_id(stat_id):
         return parts[2]
     return None
 
-# Sysusers helpers
+# --- Sysusers Helpers ---
 def join_array_as_string(arr):
     """Join array elements as comma-separated string"""
     if not arr or not isinstance(arr, list):
         return ""
-    return ", ".join(str(item) for item in arr)
+    return ", ".join(str(safe_extract(item)) for item in arr if safe_extract(item))
 
 def check_nested_field_exists(obj, field_path):
     """Check if a nested field exists"""
@@ -624,18 +712,19 @@ def check_nested_field_exists(obj, field_path):
     for key in keys:
         if isinstance(current, dict) and key in current:
             current = current[key]
+            current = safe_extract(current)
+            if current is None:
+                return False
         else:
             return False
     
     return True
 
-def check_has_acquisition(acquisition_obj):
-    """Check if acquisition object exists and has data"""
-    return acquisition_obj is not None and isinstance(acquisition_obj, dict)
+# ============================================================================
+# MAPPING DEFINITIONS - ALL COLLECTIONS WITH SAFE EXTRACTION
+# ============================================================================
 
-# --- Mapping Definitions ---
-
-# Customers mapping based on PRODUCTION data (363,806 docs)
+# Customers mapping - COMPLETE WITH ARRAY HANDLING
 CUSTOMERS_MAPPING = {
     # Primary Keys & Metadata
     'pk_client': ('_id', to_string),
@@ -643,79 +732,79 @@ CUSTOMERS_MAPPING = {
     'des_data_origin': (Literal('customers'), None),
 
     # Timestamps
-    'ts_customer_created_at': ('createdAt', to_timestamp),
-    'ts_updated_at': ('updatedAt', to_timestamp),
-    'ts_last_session': ('lastSessionAt', to_timestamp),
+    'ts_customer_created_at': ('createdAt', safe_to_timestamp),
+    'ts_updated_at': ('updatedAt', safe_to_timestamp),
+    'ts_last_session': ('lastSessionAt', safe_to_timestamp),
 
     # Customer Information
-    'des_email': ('email', None),
-    'des_phone': ('phone', None),
-    'des_given_name': ('givenName', None),
-    'des_family_name': ('familyName', None),
-    'des_country': ('country', None),
-    'txt_address': ('address.line1', None),
-    'txt_address_aux': ('address.line2', None),
-    'des_locality': ('address.locality', None),
-    'cod_zip': ('address.zip', None),
-    'des_country_address': ('address.country', None),
+    'des_email': ('email', safe_extract),
+    'des_phone': ('phone', safe_extract),
+    'des_given_name': ('givenName', safe_extract),
+    'des_family_name': ('familyName', safe_extract),
+    'des_country': ('country', safe_extract),
+    'txt_address': ('address.line1', safe_extract),
+    'txt_address_aux': ('address.line2', safe_extract),
+    'des_locality': ('address.locality', safe_extract),
+    'cod_zip': ('address.zip', safe_extract),
+    'des_country_address': ('address.country', safe_extract),
 
     # Trial Data
-    'imp_trial_amount': ('trial.amount', to_float),
-    'imp_trial_discount': ('trial.discount', to_float),
-    'val_trial_total_daily_grams': ('trial.consolidatedTrial.totalDailyGrams', to_int),
-    'val_trial_bag_count': ('trial.consolidatedTrial.bagCount', to_int),
-    'fk_trial_sales_agent': ('trial.salesAgent', None),
-    'des_trial_source': ('trial.source', None),
+    'imp_trial_amount': ('trial.amount', safe_to_float),
+    'imp_trial_discount': ('trial.discount', safe_to_float),
+    'val_trial_total_daily_grams': ('trial.consolidatedTrial.totalDailyGrams', safe_to_int),
+    'val_trial_bag_count': ('trial.consolidatedTrial.bagCount', safe_to_int),
+    'fk_trial_sales_agent': ('trial.salesAgent', safe_extract),
+    'des_trial_source': ('trial.source', safe_extract),
 
-    # Subscription Data - enhanced based on production
-    'des_subscription_status': ('subscription.status', None),
-    'ts_subscription_status_updated': ('subscription.statusUpdatedAt', to_timestamp),
-    'fk_subscription_status_updated_by': ('subscription.statusUpdatedBy', None),
-    'fk_stripe_customer': ('subscription.stripeCustId', None),
-    'cod_card_last4': ('subscription.cardLast4', None),
-    'imp_subscription_amount': ('subscription.amount', to_float),
-    'imp_extras_amount': ('subscription.extrasAmount', to_float),
-    'val_orders_in_cycle': ('subscription.ordersInCycle', to_int),
-    'val_payment_cycle_weeks': ('subscription.paymentCycleWeeks', to_int),
-    'val_total_daily_grams': ('subscription.totalDailyGrams', to_int),
-    'val_payment_issues_count': ('subscription.paymentIssuesCount', to_int),
-    'des_delivery_company': ('subscription.deliveryCompany', None),
-    'val_cooling_packs_qty': ('subscription.coolingPacksQty', to_int),
-    'pct_computed_discount': ('subscription.computedDiscountPercent', to_float),
-    'des_payment_method_id': ('subscription.paymentMethodId', None),
-    'des_payment_method_type': ('subscription.paymentMethodType', None),
-    'val_paid_orders_count': ('subscription.paidOrders.count', to_int),
-    'imp_paid_orders_total': ('subscription.paidOrders.totalAmount', to_float),
-    'flg_is_mixed_plan': ('subscription.isMixedPlan', to_bool),
-    'ts_first_mixed_plan': ('subscription.firstMixedPlanAt', to_timestamp),
-    'ts_subscription_paused': ('subscription.pausedAt', to_timestamp),
+    # Subscription Data
+    'des_subscription_status': ('subscription.status', safe_extract),
+    'ts_subscription_status_updated': ('subscription.statusUpdatedAt', safe_to_timestamp),
+    'fk_subscription_status_updated_by': ('subscription.statusUpdatedBy', safe_extract),
+    'fk_stripe_customer': ('subscription.stripeCustId', safe_extract),
+    'cod_card_last4': ('subscription.cardLast4', safe_extract),
+    'imp_subscription_amount': ('subscription.amount', safe_to_float),
+    'imp_extras_amount': ('subscription.extrasAmount', safe_to_float),
+    'val_orders_in_cycle': ('subscription.ordersInCycle', safe_to_int),
+    'val_payment_cycle_weeks': ('subscription.paymentCycleWeeks', safe_to_int),
+    'val_total_daily_grams': ('subscription.totalDailyGrams', safe_to_int),
+    'val_payment_issues_count': ('subscription.paymentIssuesCount', safe_to_int),
+    'des_delivery_company': ('subscription.deliveryCompany', safe_extract),
+    'val_cooling_packs_qty': ('subscription.coolingPacksQty', safe_to_int),
+    'pct_computed_discount': ('subscription.computedDiscountPercent', safe_to_float),
+    'des_payment_method_id': ('subscription.paymentMethodId', safe_extract),
+    'des_payment_method_type': ('subscription.paymentMethodType', safe_extract),
+    'val_paid_orders_count': ('subscription.paidOrders.count', safe_to_int),
+    'imp_paid_orders_total': ('subscription.paidOrders.totalAmount', safe_to_float),
+    'flg_is_mixed_plan': ('subscription.isMixedPlan', safe_to_bool),
+    'ts_first_mixed_plan': ('subscription.firstMixedPlanAt', safe_to_timestamp),
+    'ts_subscription_paused': ('subscription.pausedAt', safe_to_timestamp),
 
     # Pause Reason
-    'des_pause_reason_category': ('subscription.reasonForPause.category', None),
-    'des_pause_reason_subcategory': ('subscription.reasonForPause.subcategory', None),
-    'val_paused_count': ('subscription.pausedCount', to_int),
+    'des_pause_reason_category': ('subscription.reasonForPause.category', safe_extract),
+    'des_pause_reason_subcategory': ('subscription.reasonForPause.subcategory', safe_extract),
+    'val_paused_count': ('subscription.pausedCount', safe_to_int),
 
     # Coupon Data
-    'cod_coupon': ('subscription.coupon.code', None),
-    'val_referral_count': ('subscription.coupon.referralCount', to_int),
-    'pct_coupon_discount': ('subscription.coupon.discountPercent', to_float),
+    'cod_coupon': ('subscription.coupon.code', safe_extract),
+    'val_referral_count': ('subscription.coupon.referralCount', safe_to_int),
+    'pct_coupon_discount': ('subscription.coupon.discountPercent', safe_to_float),
 
     # Active Records
     'val_active_orders_count': ('subscription.activeOrders', count_array_items),
-    'cod_active_payment': ('subscription.activePayment', None),
-    'cod_new_cycle_after_order': ('subscription.newCycleAfterOrder', None),
+    'cod_active_payment': ('subscription.activePayment', safe_extract),
+    'cod_new_cycle_after_order': ('subscription.newCycleAfterOrder', safe_extract),
 
     # Flags
-    'flg_review_invitation_pending': ('subscription.isReviewInvitationPending', to_bool),
-    'des_last_review_invitation': ('subscription.lastReviewInvitation', None),
-    'flg_contacted_after_status_update': ('subscription.isContactedAfterStatusUpdated', to_bool),
+    'flg_review_invitation_pending': ('subscription.isReviewInvitationPending', safe_to_bool),
+    'des_last_review_invitation': ('subscription.lastReviewInvitation', safe_extract),
+    'flg_contacted_after_status_update': ('subscription.isContactedAfterStatusUpdated', safe_to_bool),
 
     # Integration flags
-    'flg_updated_on_hubspot': ('isUpdatedOnHubspot', to_bool),
-    'flg_updated_on_iterable': ('isUpdatedOnIterable', to_bool),
+    'flg_updated_on_hubspot': ('isUpdatedOnHubspot', safe_to_bool),
+    'flg_updated_on_iterable': ('isUpdatedOnIterable', safe_to_bool),
 
     # Legacy and Optional
-    'val_legacy_id': ('legacyId', to_int),
+    'val_legacy_id': ('legacyId', safe_to_int),
 
     # Acquisition
     'flg_has_acquisition_data': ('acquisition', check_has_acquisition),
@@ -733,7 +822,7 @@ CUSTOMERS_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Leads mapping based on PRODUCTION data (227,726 docs)
+# Leads mapping - COMPLETE WITH ARRAY HANDLING
 LEADS_MAPPING = {
     # Primary Keys & Metadata
     'pk_client': ('_id', to_string),
@@ -741,74 +830,74 @@ LEADS_MAPPING = {
     'des_data_origin': (Literal('leads'), None),
 
     # Timestamps
-    'ts_lead_created_at': ('createdAt', to_timestamp),
-    'ts_lead_updated_at': ('leadUpdatedAt', to_timestamp),
-    'ts_updated_at': ('updatedAt', to_timestamp),
-    'ts_trial_delivery_default': ('defaultDeliveryDate', to_timestamp),
-    'ts_trial_delivery': ('trialDeliveryDate', to_timestamp),
-    'ts_sales_assigned': ('sales.assignedAt', to_timestamp),
-    'ts_sales_state_updated': ('sales.stateUpdatedAt', to_timestamp),
+    'ts_lead_created_at': ('createdAt', safe_to_timestamp),
+    'ts_lead_updated_at': ('leadUpdatedAt', safe_to_timestamp),
+    'ts_updated_at': ('updatedAt', safe_to_timestamp),
+    'ts_trial_delivery_default': ('defaultDeliveryDate', safe_to_timestamp),
+    'ts_trial_delivery': ('trialDeliveryDate', safe_to_timestamp),
+    'ts_sales_assigned': ('sales.assignedAt', safe_to_timestamp),
+    'ts_sales_state_updated': ('sales.stateUpdatedAt', safe_to_timestamp),
 
-    # Lead Information - corrected coverage
-    'des_email': ('email', None),
-    'des_phone': ('phone', None),
-    'des_given_name': ('givenName', None),
-    'des_family_name': ('familyName', None),
-    'des_country': ('country', None),
-    'cod_zip': ('zip', None),
-    'txt_address': ('address.line1', None),
-    'txt_address_aux': ('address.line2', None),
-    'des_locality': ('address.locality', None),
-    'des_country_address': ('address.country', None),
+    # Lead Information
+    'des_email': ('email', safe_extract),
+    'des_phone': ('phone', safe_extract),
+    'des_given_name': ('givenName', safe_extract),
+    'des_family_name': ('familyName', safe_extract),
+    'des_country': ('country', safe_extract),
+    'cod_zip': ('zip', safe_extract),
+    'txt_address': ('address.line1', safe_extract),
+    'txt_address_aux': ('address.line2', safe_extract),
+    'des_locality': ('address.locality', safe_extract),
+    'des_country_address': ('address.country', safe_extract),
 
     # Sales Data
-    'des_sales_status': ('sales.status', None),
-    'fk_sales_agent': ('sales.assignedTo', None),
-    'val_assignment_count': ('sales.assignmentCount', to_int),
-    'val_usage_count': ('usageCount', to_int),
-    'txt_not_interested_reason': ('sales.notInterestedReason.category', None),
-    'des_not_interested_subcategory': ('sales.notInterestedReason.subcategory', None),
+    'des_sales_status': ('sales.status', safe_extract),
+    'fk_sales_agent': ('sales.assignedTo', safe_extract),
+    'val_assignment_count': ('sales.assignmentCount', safe_to_int),
+    'val_usage_count': ('usageCount', safe_to_int),
+    'txt_not_interested_reason': ('sales.notInterestedReason.category', safe_extract),
+    'des_not_interested_subcategory': ('sales.notInterestedReason.subcategory', safe_extract),
 
     # Financial Data
-    'imp_trial_amount': ('trialAmount', to_float),
-    'imp_trial_discount': ('trialDiscount', to_float),
-    'imp_subscription_amount': ('subscriptionAmount', to_float),
-    'imp_subscription_discount': ('subscriptionDiscount', to_float),
-    'pct_subscription_discount': ('subscriptionDiscountPercent', to_float),
-    'val_orders_in_cycle': ('ordersInCycle', to_int),
+    'imp_trial_amount': ('trialAmount', safe_to_float),
+    'imp_trial_discount': ('trialDiscount', safe_to_float),
+    'imp_subscription_amount': ('subscriptionAmount', safe_to_float),
+    'imp_subscription_discount': ('subscriptionDiscount', safe_to_float),
+    'pct_subscription_discount': ('subscriptionDiscountPercent', safe_to_float),
+    'val_orders_in_cycle': ('ordersInCycle', safe_to_int),
 
     # Acquisition
-    'des_acquisition_source_first': ('acquisition.first.source', None),
-    'des_acquisition_source_last': ('acquisition.last.source', None),
+    'des_acquisition_source_first': ('acquisition.first.source', safe_extract),
+    'des_acquisition_source_last': ('acquisition.last.source', safe_extract),
 
-    # Subscription data - FIX 3: Using the new helper function to handle array cases
-    'fk_stripe_customer_lead': ('subscription.stripeCustId', extract_stripe_customer_id),
-    'cod_pricing_factor': ('subscription.pricingFactor', None),
-    'ts_initial_payment_attempted': ('subscription.initialPaymentAttemptedAt', to_timestamp),
-    'cod_stripe_payment_id': ('subscription.stripePaymentId', None),
+    # Subscription data
+    'fk_stripe_customer_lead': ('subscription.stripeCustId', safe_extract),
+    'cod_pricing_factor': ('subscription.pricingFactor', safe_extract),
+    'ts_initial_payment_attempted': ('subscription.initialPaymentAttemptedAt', safe_to_timestamp),
+    'cod_stripe_payment_id': ('subscription.stripePaymentId', safe_extract),
 
     # Flags & Features
-    'flg_mixed_plan': ('isMixedPlan', to_bool),
-    'flg_anonymous': ('isAnonymous', to_bool),
-    'flg_contact_by_sms': ('contactBySMS', to_bool),
-    'flg_updated_on_iterable': ('isUpdatedOnIterable', to_bool),
-    'flg_updated_on_hubspot': ('isUpdatedOnHubspot', to_bool),
+    'flg_mixed_plan': ('isMixedPlan', safe_to_bool),
+    'flg_anonymous': ('isAnonymous', safe_to_bool),
+    'flg_contact_by_sms': ('contactBySMS', safe_to_bool),
+    'flg_updated_on_iterable': ('isUpdatedOnIterable', safe_to_bool),
+    'flg_updated_on_hubspot': ('isUpdatedOnHubspot', safe_to_bool),
 
     # Optional fields
-    'cod_coupon': ('coupon', None),
-    'cod_campaign_id': ('campaignId', None),
+    'cod_coupon': ('coupon', safe_extract),
+    'cod_campaign_id': ('campaignId', safe_extract),
 
     # Dogs aggregated
     'val_dogs_count': ('dogs', count_array_items),
 
     # Payment log
-    'flg_has_payment_log': ('paymentLog', lambda x: x is not None),
+    'flg_has_payment_log': ('paymentLog', lambda x: safe_extract(x) is not None),
     
     # Standard
     'des_source': (Literal('mongo'), None),
 }
 
-# Orders mapping based on PRODUCTION data (2,904,170 docs)
+# Orders mapping - COMPLETE WITH ARRAY HANDLING
 ORDERS_MAPPING = {
     # Primary Keys & Metadata
     'pk_order': ('_id', to_string),
@@ -816,65 +905,65 @@ ORDERS_MAPPING = {
     'des_data_origin': (Literal('orders'), None),
 
     # Order Identification
-    'fk_customer': ('custId', None),
-    'cod_payment': ('payment', None),
-    'des_full_name': ('fullName', None),
+    'fk_customer': ('custId', safe_extract),
+    'cod_payment': ('payment', safe_extract),
+    'des_full_name': ('fullName', safe_extract),
     
     # Timestamps
-    'ts_order_created': ('createdAt', to_timestamp),
-    'ts_order_updated': ('updatedAt', to_timestamp),
-    'ts_delivery_date': ('deliveryDate', to_timestamp),
-    'ts_tentative_delivery_date': ('tentativeDeliveryDate', to_timestamp),
+    'ts_order_created': ('createdAt', safe_to_timestamp),
+    'ts_order_updated': ('updatedAt', safe_to_timestamp),
+    'ts_delivery_date': ('deliveryDate', safe_to_timestamp),
+    'ts_tentative_delivery_date': ('tentativeDeliveryDate', safe_to_timestamp),
 
     # Order Status & Classification
-    'des_order_status': ('status', None),
-    'des_country': ('country', None),
+    'des_order_status': ('status', safe_extract),
+    'des_country': ('country', safe_extract),
     
     # Address Information
-    'txt_address_line1': ('address.line1', None),
-    'txt_address_line2': ('address.line2', None),
-    'des_locality': ('address.locality', None),
-    'cod_zip': ('address.zip', None),
-    'des_address_country': ('address.country', None),
+    'txt_address_line1': ('address.line1', safe_extract),
+    'txt_address_line2': ('address.line2', safe_extract),
+    'des_locality': ('address.locality', safe_extract),
+    'cod_zip': ('address.zip', safe_extract),
+    'des_address_country': ('address.country', safe_extract),
     
     # Contact Info
-    'des_email': ('email', None),
-    'des_phone': ('phone', None),
+    'des_email': ('email', safe_extract),
+    'des_phone': ('phone', safe_extract),
 
-    # Order Characteristics - corrected percentages
-    'flg_is_trial': ('isTrial', to_bool),
-    'flg_is_secondary': ('isSecondary', to_bool),
-    'flg_is_last_in_cycle': ('isLastInCycle', to_bool),
-    'flg_is_for_robots': ('isForRobots', to_bool),
-    'flg_is_additional': ('isAdditional', to_bool),
-    'flg_is_first_renewal': ('isFirstRenewal', to_bool),
-    'flg_is_mixed_plan': ('isMixedPlan', to_bool),
-    'flg_is_rescheduled': ('isRescheduled', to_bool),
-    'flg_is_express_delivery': ('isExpressDelivery', to_bool),
-    'flg_has_additional_ice_bags': ('hasAdditionalIceBags', to_bool),
-    'flg_is_agency_pickup': ('isAgencyPickup', to_bool),
-    'flg_address_is_locked': ('addressIsLocked', to_bool),
-    'flg_notification_sent': ('notificationSent', to_bool),
+    # Order Characteristics - Boolean Flags
+    'flg_is_trial': ('isTrial', safe_to_bool),
+    'flg_is_secondary': ('isSecondary', safe_to_bool),
+    'flg_is_last_in_cycle': ('isLastInCycle', safe_to_bool),
+    'flg_is_for_robots': ('isForRobots', safe_to_bool),
+    'flg_is_additional': ('isAdditional', safe_to_bool),
+    'flg_is_first_renewal': ('isFirstRenewal', safe_to_bool),
+    'flg_is_mixed_plan': ('isMixedPlan', safe_to_bool),
+    'flg_is_rescheduled': ('isRescheduled', safe_to_bool),
+    'flg_is_express_delivery': ('isExpressDelivery', safe_to_bool),
+    'flg_has_additional_ice_bags': ('hasAdditionalIceBags', safe_to_bool),
+    'flg_is_agency_pickup': ('isAgencyPickup', safe_to_bool),
+    'flg_address_is_locked': ('addressIsLocked', safe_to_bool),
+    'flg_notification_sent': ('notificationSent', safe_to_bool),
 
     # Package Details
-    'val_cooling_packs_qty': ('coolingPacksQty', to_int),
-    'val_package_bag_count': ('package.bagCount', to_int),
-    'val_total_package_count': ('package.totalPackageCount', to_int),
-    'val_total_weight_kg': ('package.totalWeightKg', to_float),
+    'val_cooling_packs_qty': ('coolingPacksQty', safe_to_int),
+    'val_package_bag_count': ('package.bagCount', safe_to_int),
+    'val_total_package_count': ('package.totalPackageCount', safe_to_int),
+    'val_total_weight_kg': ('package.totalWeightKg', safe_to_float),
     'val_package_handlers_count': ('package', extract_handlers_count),
-    'flg_package_has_issue': ('package.hasIssue', to_bool),
-    'des_package_issue_category': ('package.issueType', None),
-    'val_delta_days': ('deltaDays', to_int),
-    'des_additional_order_reason': ('additionalOrderReason', None),
-    'des_locked_by': ('lockedBy', None),
+    'flg_package_has_issue': ('package.hasIssue', safe_to_bool),
+    'des_package_issue_category': ('package.issueType', safe_extract),
+    'val_delta_days': ('deltaDays', safe_to_int),
+    'des_additional_order_reason': ('additionalOrderReason', safe_extract),
+    'des_locked_by': ('lockedBy', safe_extract),
 
     # Delivery Details
-    'des_delivery_company': ('delivery.deliveryCompany', None),
-    'flg_delivery_has_issue': ('delivery.hasIssue', to_bool),
-    'des_delivery_issue_category': ('delivery.issueType', None),
-    'cod_tracking_url': ('delivery.trackingUrl', None),
-    'cod_parcel_id': ('delivery.parcelId', None),
-    'des_label_group': ('delivery.labelGroup', None),
+    'des_delivery_company': ('delivery.deliveryCompany', safe_extract),
+    'flg_delivery_has_issue': ('delivery.hasIssue', safe_to_bool),
+    'des_delivery_issue_category': ('delivery.issueType', safe_extract),
+    'cod_tracking_url': ('delivery.trackingUrl', safe_extract),
+    'cod_parcel_id': ('delivery.parcelId', safe_extract),
+    'des_label_group': ('delivery.labelGroup', safe_extract),
 
     # Content - Aggregated from bagList
     'val_total_bags': ('content', extract_bag_totals),
@@ -895,7 +984,7 @@ ORDERS_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Payments mapping based on PRODUCTION data (2,106,258 docs)
+# Payments mapping - COMPLETE WITH ARRAY HANDLING
 PAYMENTS_MAPPING = {
     # Primary Keys & Metadata
     'pk_payment': ('_id', to_string),
@@ -903,52 +992,52 @@ PAYMENTS_MAPPING = {
     'des_data_origin': (Literal('payments'), None),
 
     # Payment Identification & Linking
-    'fk_customer': ('custId', None),
+    'fk_customer': ('custId', safe_extract),
     'val_linked_orders_count': ('orders', count_array_items),
     'txt_linked_order_ids': ('orders', extract_linked_order_ids),
     
     # Timestamps
-    'ts_payment_date': ('date', to_timestamp),
-    'ts_payment_created': ('createdAt', to_timestamp),
-    'ts_payment_updated': ('updatedAt', to_timestamp),
+    'ts_payment_date': ('date', safe_to_timestamp),
+    'ts_payment_created': ('createdAt', safe_to_timestamp),
+    'ts_payment_updated': ('updatedAt', safe_to_timestamp),
 
     # Payment Status & Processing
-    'des_payment_status': ('status', None),
-    'des_country': ('country', None),
-    'val_failed_attempts_count': ('failedAttemptsCount', to_int),
-    'des_error_code': ('errorCode', None),
+    'des_payment_status': ('status', safe_extract),
+    'des_country': ('country', safe_extract),
+    'val_failed_attempts_count': ('failedAttemptsCount', safe_to_int),
+    'des_error_code': ('errorCode', safe_extract),
 
     # Financial Amounts
-    'imp_payment_amount': ('amount', to_float),
-    'imp_invoice_amount': ('invoiceAmount', to_float),
-    'imp_discount_amount': ('discount', to_float),
-    'pct_discount_percent': ('discountPercent', to_float),
-    'imp_extras_amount': ('extrasAmount', to_float),
-    'imp_shipping_amount': ('shippingAmount', to_float),
-    'imp_additional_delivery_amount': ('additionalDeliveryAmount', to_float),
+    'imp_payment_amount': ('amount', safe_to_float),
+    'imp_invoice_amount': ('invoiceAmount', safe_to_float),
+    'imp_discount_amount': ('discount', safe_to_float),
+    'pct_discount_percent': ('discountPercent', safe_to_float),
+    'imp_extras_amount': ('extrasAmount', safe_to_float),
+    'imp_shipping_amount': ('shippingAmount', safe_to_float),
+    'imp_additional_delivery_amount': ('additionalDeliveryAmount', safe_to_float),
 
     # Stripe Integration
-    'fk_stripe_customer': ('stripeCustId', None),
-    'cod_stripe_payment_id': ('stripePaymentId', None),
-    'cod_stripe_charge_id': ('stripeChargeId', None),
+    'fk_stripe_customer': ('stripeCustId', safe_extract),
+    'cod_stripe_payment_id': ('stripePaymentId', safe_extract),
+    'cod_stripe_charge_id': ('stripeChargeId', safe_extract),
 
     # Payment Method
-    'des_payment_method_type': ('paymentMethodType', None),
-    'cod_card_last4': ('cardLast4', None),
+    'des_payment_method_type': ('paymentMethodType', safe_extract),
+    'cod_card_last4': ('cardLast4', safe_extract),
 
     # Discounts Applied
-    'pct_subscription_discount_applied': ('discountsApplied.subscriptionDiscountPercent', to_float),
-    'val_referral_count_applied': ('discountsApplied.referralCount', to_int),
-    'cod_applied_coupon': ('discountsApplied.appliedCoupon', None),
-    'pct_trial_discount_applied': ('discountsApplied.trialDiscountPercent', to_float),
+    'pct_subscription_discount_applied': ('discountsApplied.subscriptionDiscountPercent', safe_to_float),
+    'val_referral_count_applied': ('discountsApplied.referralCount', safe_to_int),
+    'cod_applied_coupon': ('discountsApplied.appliedCoupon', safe_extract),
+    'pct_trial_discount_applied': ('discountsApplied.trialDiscountPercent', safe_to_float),
 
     # Payment Characteristics - Boolean Flags
-    'flg_is_trial': ('isTrial', to_bool),
-    'flg_is_first_renewal': ('isFirstRenewal', to_bool),
-    'flg_is_rescheduled': ('isRescheduled', to_bool),
-    'flg_is_additional': ('isAdditional', to_bool),
-    'flg_is_legacy': ('isLegacy', to_bool),
-    'flg_renewal_email_sent': ('isRenewalEmailSent', to_bool),
+    'flg_is_trial': ('isTrial', safe_to_bool),
+    'flg_is_first_renewal': ('isFirstRenewal', safe_to_bool),
+    'flg_is_rescheduled': ('isRescheduled', safe_to_bool),
+    'flg_is_additional': ('isAdditional', safe_to_bool),
+    'flg_is_legacy': ('isLegacy', safe_to_bool),
+    'flg_renewal_email_sent': ('isRenewalEmailSent', safe_to_bool),
 
     # Line Items Aggregation
     'val_line_items_count': ('lineItems', extract_line_items_count),
@@ -964,14 +1053,14 @@ PAYMENTS_MAPPING = {
     'des_latest_refund_reason': ('refunds', extract_latest_refund_reason),
 
     # Optional Fields
-    'cod_pricing_factor': ('pricingFactor', None),
-    'cod_coupon': ('coupon', None),
+    'cod_pricing_factor': ('pricingFactor', safe_extract),
+    'cod_coupon': ('coupon', safe_extract),
 
     # Standard
     'des_source': (Literal('mongo'), None),
 }
 
-# Deliveries mapping based on PRODUCTION data (413,010 docs)
+# Deliveries mapping - COMPLETE WITH ARRAY HANDLING
 DELIVERIES_MAPPING = {
     # Primary Keys & Metadata
     'pk_delivery': ('_id', to_string),
@@ -979,38 +1068,38 @@ DELIVERIES_MAPPING = {
     'des_data_origin': (Literal('deliveries'), None),
 
     # Delivery Identification & Linking
-    'fk_customer': ('custId', None),
-    'des_full_name': ('fullName', None),
-    'cod_parcel_id': ('parcelId', None),
+    'fk_customer': ('custId', safe_extract),
+    'des_full_name': ('fullName', safe_extract),
+    'cod_parcel_id': ('parcelId', safe_extract),
     
     # Timestamps
-    'ts_delivery_created': ('createdAt', to_timestamp),
-    'ts_delivery_updated': ('updatedAt', to_timestamp),
-    'ts_delivery_date_scheduled': ('deliveryDate', to_timestamp),
-    'ts_delivery_date_actual': ('date', to_timestamp),
-    'ts_issue_solved_at': ('issue.solvedAt', to_timestamp),
+    'ts_delivery_created': ('createdAt', safe_to_timestamp),
+    'ts_delivery_updated': ('updatedAt', safe_to_timestamp),
+    'ts_delivery_date_scheduled': ('deliveryDate', safe_to_timestamp),
+    'ts_delivery_date_actual': ('date', safe_to_timestamp),
+    'ts_issue_solved_at': ('issue.solvedAt', safe_to_timestamp),
 
     # Delivery Status & Classification
-    'des_delivery_status': ('status', None),
-    'des_country': ('country', None),
-    'des_delivery_company': ('deliveryCompany', None),
-    'des_label_group': ('labelGroup', None),
+    'des_delivery_status': ('status', safe_extract),
+    'des_country': ('country', safe_extract),
+    'des_delivery_company': ('deliveryCompany', safe_extract),
+    'des_label_group': ('labelGroup', safe_extract),
     
     # Address Information
-    'txt_address_line1': ('address.line1', None),
-    'txt_address_line2': ('address.line2', None),
-    'des_locality': ('address.locality', None),
-    'cod_zip': ('address.zip', None),
-    'des_address_country': ('address.country', None),
+    'txt_address_line1': ('address.line1', safe_extract),
+    'txt_address_line2': ('address.line2', safe_extract),
+    'des_locality': ('address.locality', safe_extract),
+    'cod_zip': ('address.zip', safe_extract),
+    'des_address_country': ('address.country', safe_extract),
 
     # Delivery Characteristics - Boolean Flags
-    'flg_is_for_robots': ('isForRobots', to_bool),
-    'flg_cust_label_printed': ('isPrinted.cust', to_bool),
-    'flg_internal_label_printed': ('isPrinted.internal', to_bool),
+    'flg_is_for_robots': ('isForRobots', safe_to_bool),
+    'flg_cust_label_printed': ('isPrinted.cust', safe_to_bool),
+    'flg_internal_label_printed': ('isPrinted.internal', safe_to_bool),
 
     # Issue Tracking
-    'flg_has_issue': ('issue.hasIssue', to_bool),
-    'txt_issue_reason': ('issue.reason', None),
+    'flg_has_issue': ('issue.hasIssue', safe_to_bool),
+    'txt_issue_reason': ('issue.reason', safe_extract),
 
     # Label Data
     'flg_has_label_data': ('labelData', has_label_data),
@@ -1022,62 +1111,62 @@ DELIVERIES_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Coupons mapping
+# Coupons mapping - COMPLETE WITH ARRAY HANDLING
 COUPONS_MAPPING = {
     'pk_coupon': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
     'des_data_origin': (Literal('coupons'), None),
     'cod_coupon': ('_id', to_string),
-    'ts_coupon_created_at': ('createdAt', to_timestamp),
-    'des_coupon_type': ('type', None),
-    'des_country': ('country', None),
-    'flg_is_not_applicable': ('isNotApplicable', to_bool),
+    'ts_coupon_created_at': ('createdAt', safe_to_timestamp),
+    'des_coupon_type': ('type', safe_extract),
+    'des_country': ('country', safe_extract),
+    'flg_is_not_applicable': ('isNotApplicable', safe_to_bool),
     'des_source': (Literal('mongo'), None),
 }
 
-# Users-metadata mapping
+# Users-metadata mapping - COMPLETE WITH ARRAY HANDLING
 USERS_METADATA_MAPPING = {
     'pk_user_metadata': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
-    'des_data_origin': (Literal('users-metadata'), None),  # FIX 2: Changed from users_metadata
+    'des_data_origin': (Literal('users-metadata'), None),
     'fk_customer': ('_id', to_string),
-    'txt_password_hash': ('password', None),
-    'cod_verification_token': ('verificationToken', None),
-    'ts_auth_created_at': ('createdAt', to_timestamp),
-    'ts_auth_updated_at': ('updatedAt', to_timestamp),
-    'val_version': ('__v', to_int),
-    'flg_is_suspended': ('isSuspended', to_bool),
+    'txt_password_hash': ('password', safe_extract),
+    'cod_verification_token': ('verificationToken', safe_extract),
+    'ts_auth_created_at': ('createdAt', safe_to_timestamp),
+    'ts_auth_updated_at': ('updatedAt', safe_to_timestamp),
+    'val_version': ('__v', safe_to_int),
+    'flg_is_suspended': ('isSuspended', safe_to_bool),
     'des_source': (Literal('mongo'), None),
 }
 
-# Leads-archive mapping
+# Leads-archive mapping - COMPLETE WITH ARRAY HANDLING
 LEADS_ARCHIVE_MAPPING = {
     'pk_lead_archive': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
-    'des_data_origin': (Literal('leads-archive'), None),  # FIX 2: Changed from leads_archive
+    'des_data_origin': (Literal('leads-archive'), None),
     'fk_lead': ('_id', to_string),
-    'ts_lead_created_at': ('createdAt', to_timestamp),
-    'ts_lead_updated_at': ('leadUpdatedAt', to_timestamp),
-    'ts_updated_at': ('updatedAt', to_timestamp),
-    'ts_trial_delivery_default': ('defaultDeliveryDate', to_timestamp),
-    'ts_trial_delivery': ('trialDeliveryDate', to_timestamp),
-    'des_email': ('email', None),
-    'des_phone': ('phone', None),
-    'des_given_name': ('givenName', None),
-    'des_family_name': ('familyName', None),
-    'des_country': ('country', None),
-    'cod_zip': ('zip', None),
-    'imp_trial_amount': ('trialAmount', to_float),
-    'imp_trial_discount': ('trialDiscount', to_float),
-    'imp_subscription_amount': ('subscriptionAmount', to_float),
-    'imp_subscription_discount': ('subscriptionDiscount', to_float),
-    'pct_subscription_discount': ('subscriptionDiscountPercent', to_float),
-    'val_orders_in_cycle': ('ordersInCycle', to_int),
-    'val_usage_count': ('usageCount', to_int),
-    'val_mailing_stage': ('mailingStage', to_int),
-    'cod_coupon': ('coupon', None),
-    'cod_campaign_id': ('campaignId', None),
-    'flg_has_email_deliverability': ('emailDeliverability', lambda x: x is not None),
+    'ts_lead_created_at': ('createdAt', safe_to_timestamp),
+    'ts_lead_updated_at': ('leadUpdatedAt', safe_to_timestamp),
+    'ts_updated_at': ('updatedAt', safe_to_timestamp),
+    'ts_trial_delivery_default': ('defaultDeliveryDate', safe_to_timestamp),
+    'ts_trial_delivery': ('trialDeliveryDate', safe_to_timestamp),
+    'des_email': ('email', safe_extract),
+    'des_phone': ('phone', safe_extract),
+    'des_given_name': ('givenName', safe_extract),
+    'des_family_name': ('familyName', safe_extract),
+    'des_country': ('country', safe_extract),
+    'cod_zip': ('zip', safe_extract),
+    'imp_trial_amount': ('trialAmount', safe_to_float),
+    'imp_trial_discount': ('trialDiscount', safe_to_float),
+    'imp_subscription_amount': ('subscriptionAmount', safe_to_float),
+    'imp_subscription_discount': ('subscriptionDiscount', safe_to_float),
+    'pct_subscription_discount': ('subscriptionDiscountPercent', safe_to_float),
+    'val_orders_in_cycle': ('ordersInCycle', safe_to_int),
+    'val_usage_count': ('usageCount', safe_to_int),
+    'val_mailing_stage': ('mailingStage', safe_to_int),
+    'cod_coupon': ('coupon', safe_extract),
+    'cod_campaign_id': ('campaignId', safe_extract),
+    'flg_has_email_deliverability': ('emailDeliverability', lambda x: safe_extract(x) is not None),
     'des_sales_status': ('sales', extract_sales_status),
     'ts_sales_assigned_at': ('sales', extract_sales_assigned_at),
     'val_sales_reassignment_count': ('sales', extract_sales_reassignment_count),
@@ -1085,28 +1174,28 @@ LEADS_ARCHIVE_MAPPING = {
     'val_dogs_count': ('dogs', count_array_items),
     'txt_dog_names': ('dogs', extract_dog_names),
     'val_total_dog_weight': ('dogs', sum_dog_weights),
-    'flg_mixed_plan': ('isMixedPlan', to_bool),
-    'flg_anonymous': ('isAnonymous', to_bool),
-    'flg_contact_by_sms': ('contactBySMS', to_bool),
-    'flg_updated_on_hubspot': ('isUpdatedOnHubspot', to_bool),
-    'flg_updated_on_iterable': ('isUpdatedOnIterable', to_bool),
-    'flg_has_acquisition_data': ('acquisition', lambda x: x is not None),
-    'flg_has_shared_info': ('sharedInfo', lambda x: x is not None),
-    'flg_has_subscription_data': ('subscription', lambda x: x is not None),
-    'flg_has_address': ('address', lambda x: x is not None),
-    'flg_has_payment_log': ('paymentLog', lambda x: x is not None),
-    'val_version': ('__v', to_int),
+    'flg_mixed_plan': ('isMixedPlan', safe_to_bool),
+    'flg_anonymous': ('isAnonymous', safe_to_bool),
+    'flg_contact_by_sms': ('contactBySMS', safe_to_bool),
+    'flg_updated_on_hubspot': ('isUpdatedOnHubspot', safe_to_bool),
+    'flg_updated_on_iterable': ('isUpdatedOnIterable', safe_to_bool),
+    'flg_has_acquisition_data': ('acquisition', lambda x: safe_extract(x) is not None),
+    'flg_has_shared_info': ('sharedInfo', lambda x: safe_extract(x) is not None),
+    'flg_has_subscription_data': ('subscription', lambda x: safe_extract(x) is not None),
+    'flg_has_address': ('address', lambda x: safe_extract(x) is not None),
+    'flg_has_payment_log': ('paymentLog', lambda x: safe_extract(x) is not None),
+    'val_version': ('__v', safe_to_int),
     'des_source': (Literal('mongo'), None),
 }
 
-# Contacts-logs mapping
+# Contacts-logs mapping - COMPLETE WITH ARRAY HANDLING
 CONTACTS_LOGS_MAPPING = {
     'pk_contact_log': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
-    'des_data_origin': (Literal('contacts-logs'), None),  # FIX 2: Changed from contacts_logs
+    'des_data_origin': (Literal('contacts-logs'), None),
     'fk_lead': ('_id', to_string),
-    'ts_created_at': ('createdAt', to_timestamp),
-    'ts_updated_at': ('updatedAt', to_timestamp),
+    'ts_created_at': ('createdAt', safe_to_timestamp),
+    'ts_updated_at': ('updatedAt', safe_to_timestamp),
     'val_logs_count': ('logs', extract_logs_count),
     'val_total_call_duration': ('logs', extract_total_duration),
     'val_call_count': ('logs', extract_call_count),
@@ -1121,71 +1210,71 @@ CONTACTS_LOGS_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Retentions mapping
+# Retentions mapping - COMPLETE WITH ARRAY HANDLING
 RETENTIONS_MAPPING = {
     'pk_retention': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
     'des_data_origin': (Literal('retentions'), None),
     'fk_customer': ('cust', to_string),
-    'ts_created_at': ('createdAt', to_timestamp),
-    'ts_updated_at': ('updatedAt', to_timestamp),
-    'ts_assigned_at': ('assignedAt', to_timestamp),
-    'ts_paused_at': ('pausedAt', to_timestamp),
-    'ts_reactivated_at': ('reactivatedAt', to_timestamp),
-    'ts_contacted_at': ('contactedAt', to_timestamp),
-    'ts_appointment_at': ('appointmentAt', to_timestamp),
-    'des_retention_status': ('status', None),
-    'val_reassignment_count': ('reassignmentCount', to_int),
+    'ts_created_at': ('createdAt', safe_to_timestamp),
+    'ts_updated_at': ('updatedAt', safe_to_timestamp),
+    'ts_assigned_at': ('assignedAt', safe_to_timestamp),
+    'ts_paused_at': ('pausedAt', safe_to_timestamp),
+    'ts_reactivated_at': ('reactivatedAt', safe_to_timestamp),
+    'ts_contacted_at': ('contactedAt', safe_to_timestamp),
+    'ts_appointment_at': ('appointmentAt', safe_to_timestamp),
+    'des_retention_status': ('status', safe_extract),
+    'val_reassignment_count': ('reassignmentCount', safe_to_int),
     'val_contact_channels_count': ('contactChannels', extract_contact_channels_count),
     'txt_contact_channels': ('contactChannels', extract_contact_channels_list),
     'des_pause_reason_category': ('reasonForPause', extract_reason_category),
     'des_pause_reason_subcategory': ('reasonForPause', extract_reason_subcategory),
     'val_comeback_probability': ('reasonForPause', extract_comeback_probability),
-    'fk_sys_user': ('sysUser', None),
-    'cod_zendesk_ticket': ('zendeskTicketId', None),
-    'flg_reactivated_by_agent': ('isReactivatedByAgent', to_bool),
-    'flg_retention_due_to_agent': ('isRetentionDueToAgent', to_bool),
+    'fk_sys_user': ('sysUser', safe_extract),
+    'cod_zendesk_ticket': ('zendeskTicketId', safe_extract),
+    'flg_reactivated_by_agent': ('isReactivatedByAgent', safe_to_bool),
+    'flg_retention_due_to_agent': ('isRetentionDueToAgent', safe_to_bool),
     'des_source': (Literal('mongo'), None),
 }
 
-# Notifications mapping
+# Notifications mapping - COMPLETE WITH ARRAY HANDLING
 NOTIFICATIONS_MAPPING = {
     'pk_notification': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
     'des_data_origin': (Literal('notifications'), None),
     'fk_recipient': ('recipient', to_string),
-    'des_recipient_model': ('recipientModel', None),
+    'des_recipient_model': ('recipientModel', safe_extract),
     'fk_document': ('docId', to_string),
-    'des_document_model': ('docModel', None),
-    'des_notification_type': ('notificationType', None),
-    'ts_created_at': ('createdAt', to_timestamp),
-    'ts_updated_at': ('updatedAt', to_timestamp),
-    'ts_read_at': ('readAt', to_timestamp),
+    'des_document_model': ('docModel', safe_extract),
+    'des_notification_type': ('notificationType', safe_extract),
+    'ts_created_at': ('createdAt', safe_to_timestamp),
+    'ts_updated_at': ('updatedAt', safe_to_timestamp),
+    'ts_read_at': ('readAt', safe_to_timestamp),
     'flg_is_read': ('readAt', is_read),
     'des_source': (Literal('mongo'), None),
 }
 
-# Appointments mapping
+# Appointments mapping - COMPLETE WITH ARRAY HANDLING
 APPOINTMENTS_MAPPING = {
     'pk_appointment': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
     'des_data_origin': (Literal('appointments'), None),
     'fk_sys_user': ('sysUserId', to_string),
     'fk_lead': ('leadId', to_string),
-    'ts_created_at': ('createdAt', to_timestamp),
-    'ts_updated_at': ('updatedAt', to_timestamp),
-    'ts_starts_at': ('startsAt', to_timestamp),
-    'txt_notes': ('notes', None),
+    'ts_created_at': ('createdAt', safe_to_timestamp),
+    'ts_updated_at': ('updatedAt', safe_to_timestamp),
+    'ts_starts_at': ('startsAt', safe_to_timestamp),
+    'txt_notes': ('notes', safe_extract),
     'des_source': (Literal('mongo'), None),
 }
 
-# Changelogs mapping
+# Changelogs mapping - COMPLETE WITH ARRAY HANDLING
 CHANGELOGS_MAPPING = {
     'pk_changelog': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
     'des_data_origin': (Literal('changelogs'), None),
-    'ts_created_at': ('createdAt', to_timestamp),
-    'ts_updated_at': ('updatedAt', to_timestamp),
+    'ts_created_at': ('createdAt', safe_to_timestamp),
+    'ts_updated_at': ('updatedAt', safe_to_timestamp),
     'des_entity_type': ('_id', extract_entity_type),
     'fk_entity_id': ('_id', to_string),
     'val_total_changes': ('logs', count_array_items),
@@ -1200,218 +1289,220 @@ CHANGELOGS_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Orders-archive mapping
+# Orders-archive mapping - COMPLETE WITH ARRAY HANDLING
 ORDERS_ARCHIVE_MAPPING = {
     'pk_order': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
-    'des_data_origin': (Literal('orders-archive'), None),  # FIX 2: Changed from orders_archive
-    'fk_customer': ('custId', None),
-    'cod_payment': ('payment', None),
-    'des_full_name': ('fullName', None),
-    'ts_order_created': ('createdAt', to_timestamp),
-    'ts_order_updated': ('updatedAt', to_timestamp),
-    'ts_delivery_date': ('deliveryDate', to_timestamp),
-    'ts_initial_date': ('initialDate', to_timestamp),
-    'des_order_status': ('status', None),
-    'des_country': ('country', None),
-    'txt_address_line1': ('address.line1', None),
-    'txt_address_line2': ('address.line2', None),
-    'des_locality': ('address.locality', None),
-    'cod_zip': ('address.zip', None),
-    'des_address_country': ('address.country', None),
-    'des_email': ('email', None),
-    'des_phone': ('phone', None),
-    'flg_is_trial': ('isTrial', to_bool),
-    'flg_is_secondary': ('isSecondary', to_bool),
-    'flg_is_last_in_cycle': ('isLastInCycle', to_bool),
-    'flg_is_additional': ('isAdditional', to_bool),
-    'flg_is_first_renewal': ('isFirstRenewal', to_bool),
-    'flg_is_rescheduled': ('isRescheduled', to_bool),
-    'flg_is_express_delivery': ('isExpressDelivery', to_bool),
-    'flg_has_additional_ice_bags': ('hasAdditionalIceBags', to_bool),
-    'flg_address_is_locked': ('addressIsLocked', to_bool),
-    'flg_is_legacy': ('isLegacy', to_bool),
-    'flg_was_moved': ('wasMoved', to_bool),
-    'flg_was_moved_back': ('wasMovedBack', to_bool),
-    'flg_was_reset': ('wasReset', to_bool),
-    'flg_notification_sent': ('notificationSent', to_bool),
-    'val_package_bag_count': ('package.bagCount', to_int),
-    'val_total_package_count': ('package.totalPackageCount', to_int),
-    'val_total_weight_kg': ('package.totalWeightKg', to_float),
-    'des_delivery_company': ('delivery.deliveryCompany', None),
-    'flg_delivery_has_issue': ('delivery.hasIssue', to_bool),
-    'val_total_bags': ('content.bagCount', to_int),
-    'val_chicken_portions': ('content.menu.chicken', to_int),
-    'val_turkey_portions': ('content.menu.turkey', to_int),
-    'des_locked_by': ('lockedBy', None),
-    'des_updated_by': ('__updatedBy', None),
-    'val_delta_days': ('deltaDays', to_int),
-    'val_version': ('__v', to_int),
+    'des_data_origin': (Literal('orders-archive'), None),
+    'fk_customer': ('custId', safe_extract),
+    'cod_payment': ('payment', safe_extract),
+    'des_full_name': ('fullName', safe_extract),
+    'ts_order_created': ('createdAt', safe_to_timestamp),
+    'ts_order_updated': ('updatedAt', safe_to_timestamp),
+    'ts_delivery_date': ('deliveryDate', safe_to_timestamp),
+    'ts_initial_date': ('initialDate', safe_to_timestamp),
+    'des_order_status': ('status', safe_extract),
+    'des_country': ('country', safe_extract),
+    'txt_address_line1': ('address.line1', safe_extract),
+    'txt_address_line2': ('address.line2', safe_extract),
+    'des_locality': ('address.locality', safe_extract),
+    'cod_zip': ('address.zip', safe_extract),
+    'des_address_country': ('address.country', safe_extract),
+    'des_email': ('email', safe_extract),
+    'des_phone': ('phone', safe_extract),
+    'flg_is_trial': ('isTrial', safe_to_bool),
+    'flg_is_secondary': ('isSecondary', safe_to_bool),
+    'flg_is_last_in_cycle': ('isLastInCycle', safe_to_bool),
+    'flg_is_additional': ('isAdditional', safe_to_bool),
+    'flg_is_first_renewal': ('isFirstRenewal', safe_to_bool),
+    'flg_is_rescheduled': ('isRescheduled', safe_to_bool),
+    'flg_is_express_delivery': ('isExpressDelivery', safe_to_bool),
+    'flg_has_additional_ice_bags': ('hasAdditionalIceBags', safe_to_bool),
+    'flg_address_is_locked': ('addressIsLocked', safe_to_bool),
+    'flg_is_legacy': ('isLegacy', safe_to_bool),
+    'flg_was_moved': ('wasMoved', safe_to_bool),
+    'flg_was_moved_back': ('wasMovedBack', safe_to_bool),
+    'flg_was_reset': ('wasReset', safe_to_bool),
+    'flg_notification_sent': ('notificationSent', safe_to_bool),
+    'val_package_bag_count': ('package.bagCount', safe_to_int),
+    'val_total_package_count': ('package.totalPackageCount', safe_to_int),
+    'val_total_weight_kg': ('package.totalWeightKg', safe_to_float),
+    'des_delivery_company': ('delivery.deliveryCompany', safe_extract),
+    'flg_delivery_has_issue': ('delivery.hasIssue', safe_to_bool),
+    'val_total_bags': ('content.bagCount', safe_to_int),
+    'val_chicken_portions': ('content.menu.chicken', safe_to_int),
+    'val_turkey_portions': ('content.menu.turkey', safe_to_int),
+    'des_locked_by': ('lockedBy', safe_extract),
+    'des_updated_by': ('__updatedBy', safe_extract),
+    'val_delta_days': ('deltaDays', safe_to_int),
+    'val_version': ('__v', safe_to_int),
     'des_source': (Literal('mongo'), None),
 }
 
-# Payments-archive mapping
+# Payments-archive mapping - COMPLETE WITH ARRAY HANDLING
 PAYMENTS_ARCHIVE_MAPPING = {
     'pk_payment': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
-    'des_data_origin': (Literal('payments-archive'), None),  # FIX 2: Changed from payments_archive
-    'fk_customer': ('custId', None),
+    'des_data_origin': (Literal('payments-archive'), None),
+    'fk_customer': ('custId', safe_extract),
     'val_linked_orders_count': ('orders', count_array_items),
     'txt_linked_order_ids': ('orders', extract_linked_order_ids),
-    'ts_payment_date': ('date', to_timestamp),
-    'ts_payment_created': ('createdAt', to_timestamp),
-    'ts_payment_updated': ('updatedAt', to_timestamp),
-    'ts_initial_date': ('initialDate', to_timestamp),
-    'des_payment_status': ('status', None),
-    'des_country': ('country', None),
-    'val_failed_attempts_count': ('failedAttemptsCount', to_int),
-    'flg_first_attempt_failed': ('firstAttemptFailed', to_bool),
-    'imp_payment_amount': ('amount', to_float),
-    'imp_invoice_amount': ('invoiceAmount', to_float),
-    'imp_discount_amount': ('discount', to_float),
-    'pct_discount_percent': ('discountPercent', to_float),
-    'imp_extras_amount': ('extrasAmount', to_float),
-    'imp_shipping_amount': ('shippingAmount', to_float),
-    'fk_stripe_customer': ('stripeCustId', None),
-    'cod_stripe_payment_id': ('stripePaymentId', None),
-    'cod_stripe_invoice_id': ('stripeInvoiceId', None),
-    'cod_stripe_charge_id': ('stripeChargeId', None),
+    'ts_payment_date': ('date', safe_to_timestamp),
+    'ts_payment_created': ('createdAt', safe_to_timestamp),
+    'ts_payment_updated': ('updatedAt', safe_to_timestamp),
+    'ts_initial_date': ('initialDate', safe_to_timestamp),
+    'des_payment_status': ('status', safe_extract),
+    'des_country': ('country', safe_extract),
+    'val_failed_attempts_count': ('failedAttemptsCount', safe_to_int),
+    'flg_first_attempt_failed': ('firstAttemptFailed', safe_to_bool),
+    'imp_payment_amount': ('amount', safe_to_float),
+    'imp_invoice_amount': ('invoiceAmount', safe_to_float),
+    'imp_discount_amount': ('discount', safe_to_float),
+    'pct_discount_percent': ('discountPercent', safe_to_float),
+    'imp_extras_amount': ('extrasAmount', safe_to_float),
+    'imp_shipping_amount': ('shippingAmount', safe_to_float),
+    'fk_stripe_customer': ('stripeCustId', safe_extract),
+    'cod_stripe_payment_id': ('stripePaymentId', safe_extract),
+    'cod_stripe_invoice_id': ('stripeInvoiceId', safe_extract),
+    'cod_stripe_charge_id': ('stripeChargeId', safe_extract),
     'val_line_items_count': ('lineItems', extract_line_items_count),
     'val_total_product_qty': ('lineItems', extract_total_product_qty),
     'val_total_product_grams': ('lineItems', extract_total_product_grams),
     'imp_line_items_total_amount': ('lineItems', extract_line_items_total_amount),
-    'flg_is_trial': ('isTrial', to_bool),
-    'flg_is_first_renewal': ('isFirstRenewal', to_bool),
-    'flg_is_additional': ('isAdditional', to_bool),
-    'flg_is_legacy': ('isLegacy', to_bool),
-    'flg_was_moved': ('wasMoved', to_bool),
-    'cod_coupon': ('coupon', None),
-    'cod_invoice_code': ('invoiceCode', None),
-    'val_version': ('__v', to_int),
+    'flg_is_trial': ('isTrial', safe_to_bool),
+    'flg_is_first_renewal': ('isFirstRenewal', safe_to_bool),
+    'flg_is_additional': ('isAdditional', safe_to_bool),
+    'flg_is_legacy': ('isLegacy', safe_to_bool),
+    'flg_was_moved': ('wasMoved', safe_to_bool),
+    'cod_coupon': ('coupon', safe_extract),
+    'cod_invoice_code': ('invoiceCode', safe_extract),
+    'val_version': ('__v', safe_to_int),
     'des_source': (Literal('mongo'), None),
 }
 
-# Packages mapping
+# Packages mapping - COMPLETE WITH ARRAY HANDLING
 PACKAGES_MAPPING = {
     'pk_package': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
     'des_data_origin': (Literal('packages'), None),
-    'fk_handler': ('handlerId', None),
-    'ts_created_at': ('createdAt', to_timestamp),
-    'ts_updated_at': ('updatedAt', to_timestamp),
-    'ts_used_at': ('usedAt', to_timestamp),
-    'val_bag_count': ('bagCount', to_int),
-    'val_daily_grams': ('dailyGrams', to_int),
-    'flg_is_trial': ('isTrial', to_bool),
-    'flg_is_used': ('usedAt', lambda x: x is not None),
+    'fk_handler': ('handlerId', safe_extract),
+    'ts_created_at': ('createdAt', safe_to_timestamp),
+    'ts_updated_at': ('updatedAt', safe_to_timestamp),
+    'ts_used_at': ('usedAt', safe_to_timestamp),
+    'val_bag_count': ('bagCount', safe_to_int),
+    'val_daily_grams': ('dailyGrams', safe_to_int),
+    'flg_is_trial': ('isTrial', safe_to_bool),
+    'flg_is_used': ('usedAt', lambda x: safe_extract(x) is not None),
     'des_source': (Literal('mongo'), None),
 }
 
-# Engagement-histories mapping
+# Engagement-histories mapping - COMPLETE WITH ARRAY HANDLING
 ENGAGEMENT_HISTORIES_MAPPING = {
     'pk_engagement': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
-    'des_data_origin': (Literal('engagement-histories'), None),  # FIX 2: Changed from engagement_histories
-    'ts_created_at': ('createdAt', to_timestamp),
-    'ts_updated_at': ('updatedAt', to_timestamp),
-    'flg_survey_engaged': ('cust.tests.customerDataSurvey.isEngaged', to_bool),
-    'des_survey_value': ('cust.tests.customerDataSurvey.value', None),
-    'flg_has_daily_grams_recommendations': ('cust.recommendationData.dailyGrams', lambda x: x is not None and len(x) > 0),
-    'flg_has_menu_recommendations': ('cust.recommendationData.menus', lambda x: x is not None and len(x) > 0),
+    'des_data_origin': (Literal('engagement-histories'), None),
+    'ts_created_at': ('createdAt', safe_to_timestamp),
+    'ts_updated_at': ('updatedAt', safe_to_timestamp),
+    'flg_survey_engaged': ('cust.tests.customerDataSurvey.isEngaged', safe_to_bool),
+    'des_survey_value': ('cust.tests.customerDataSurvey.value', safe_extract),
+    'flg_has_daily_grams_recommendations': ('cust.recommendationData.dailyGrams', lambda x: safe_extract(x) is not None and len(x) > 0 if isinstance(x, list) else False),
+    'flg_has_menu_recommendations': ('cust.recommendationData.menus', lambda x: safe_extract(x) is not None and len(x) > 0 if isinstance(x, list) else False),
     'des_source': (Literal('mongo'), None),
 }
 
-# Geocontext mapping
+# Geocontext mapping - COMPLETE WITH ARRAY HANDLING
 GEOCONTEXT_MAPPING = {
     'pk_geocontext': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
     'des_data_origin': (Literal('geocontext'), None),
     'val_ip_range_start': ('fromIp', to_string),
     'val_ip_range_end': ('toIp', to_string),
-    'des_country': ('country', None),
+    'des_country': ('country', safe_extract),
     'des_source': (Literal('mongo'), None),
 }
 
-# Invalid-phones mapping
+# Invalid-phones mapping - COMPLETE WITH ARRAY HANDLING
 INVALID_PHONES_MAPPING = {
     'pk_phone': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
-    'des_data_origin': (Literal('invalid-phones'), None),  # FIX 2: Changed from invalid_phones
+    'des_data_origin': (Literal('invalid-phones'), None),
     'des_phone_number': ('_id', to_string),
-    'des_country': ('country', None),
-    'des_created_by': ('createdBy', None),
-    'ts_created_at': ('createdAt', to_timestamp),
+    'des_country': ('country', safe_extract),
+    'des_created_by': ('createdBy', safe_extract),
+    'ts_created_at': ('createdAt', safe_to_timestamp),
     'des_source': (Literal('mongo'), None),
 }
 
-# Sysusers mapping
+# Sysusers mapping - COMPLETE WITH ARRAY HANDLING
 SYSUSERS_MAPPING = {
     'pk_sysuser': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
     'des_data_origin': (Literal('sysusers'), None),
-    'des_given_name': ('givenName', None),
-    'des_family_name': ('familyName', None),
-    'des_email': ('email', None),
-    'des_country': ('country', None),
-    'ts_created_at': ('createdAt', to_timestamp),
-    'ts_updated_at': ('updatedAt', to_timestamp),
-    'ts_last_session_at': ('lastSessionAt', to_timestamp),
+    'des_given_name': ('givenName', safe_extract),
+    'des_family_name': ('familyName', safe_extract),
+    'des_email': ('email', safe_extract),
+    'des_country': ('country', safe_extract),
+    'ts_created_at': ('createdAt', safe_to_timestamp),
+    'ts_updated_at': ('updatedAt', safe_to_timestamp),
+    'ts_last_session_at': ('lastSessionAt', safe_to_timestamp),
     'txt_roles': ('roles', join_array_as_string),
-    'des_role': ('role', None),
+    'des_role': ('role', safe_extract),
     'txt_manages_countries': ('managesCountries', join_array_as_string),
-    'flg_is_suspended': ('isSuspended', to_bool),
-    'flg_is_sales_available': ('sales.isAvailable', to_bool),
-    'flg_has_sales_tracking': ('sales', lambda x: x is not None),
-    'flg_has_retentions': ('retentions', lambda x: x is not None),
+    'flg_is_suspended': ('isSuspended', safe_to_bool),
+    'flg_is_sales_available': ('sales.isAvailable', safe_to_bool),
+    'flg_has_sales_tracking': ('sales', lambda x: safe_extract(x) is not None),
+    'flg_has_retentions': ('retentions', lambda x: safe_extract(x) is not None),
     'des_source': (Literal('mongo'), None),
 }
 
-# Stats mapping
+# Stats mapping - COMPLETE WITH ARRAY HANDLING
 STATS_MAPPING = {
     'pk_stat': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
     'des_data_origin': (Literal('stats'), None),
-    'ts_created_at': ('createdAt', to_timestamp),
-    'ts_updated_at': ('updatedAt', to_timestamp),
-    'val_year': ('year', to_int),
-    'val_month': ('month', to_int),
+    'ts_created_at': ('createdAt', safe_to_timestamp),
+    'ts_updated_at': ('updatedAt', safe_to_timestamp),
+    'val_year': ('year', safe_to_int),
+    'val_month': ('month', safe_to_int),
     'des_stat_type': ('_id', extract_stat_type),
     'fk_agent_or_handler': ('_id', extract_agent_from_stat_id),
-    'des_stat_country': ('country', None),
-    'val_total_assigned_leads': ('totals.assignedLeads.total', to_int),
-    'val_total_appointments': ('totals.appointments', to_int),
-    'val_total_sales': ('totals.sales', to_int),
-    'val_total_not_answered': ('totals.notAnswered', to_int),
-    'val_total_not_interested': ('totals.notInterested', to_int),
-    'val_total_orders': ('totals.orderCount', to_int),
-    'val_total_packages': ('totals.packageCount', to_int),
-    'pct_conversion_rate': ('conversionRate', to_float),
-    'pct_retention_rate': ('retentionRate', to_float),
-    'imp_average_sales': ('averageSales', to_float),
+    'des_stat_country': ('country', safe_extract),
+    'val_total_assigned_leads': ('totals.assignedLeads.total', safe_to_int),
+    'val_total_appointments': ('totals.appointments', safe_to_int),
+    'val_total_sales': ('totals.sales', safe_to_int),
+    'val_total_not_answered': ('totals.notAnswered', safe_to_int),
+    'val_total_not_interested': ('totals.notInterested', safe_to_int),
+    'val_total_orders': ('totals.orderCount', safe_to_int),
+    'val_total_packages': ('totals.packageCount', safe_to_int),
+    'pct_conversion_rate': ('conversionRate', safe_to_float),
+    'pct_retention_rate': ('retentionRate', safe_to_float),
+    'imp_average_sales': ('averageSales', safe_to_float),
     'des_source': (Literal('mongo'), None),
 }
 
-# Sysinfo mapping
+# Sysinfo mapping - COMPLETE WITH ARRAY HANDLING
 SYSINFO_MAPPING = {
     'pk_config': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
     'des_data_origin': (Literal('sysinfo'), None),
-    'ts_updated_at': ('updatedAt', to_timestamp),
+    'ts_updated_at': ('updatedAt', safe_to_timestamp),
     'des_config_type': ('_id', to_string),
-    'flg_has_cron_settings': ('cron', lambda x: x is not None),
-    'flg_has_email_settings': ('transactionalEmails', lambda x: x is not None),
-    'flg_has_sales_settings': ('sales', lambda x: x is not None),
-    'flg_has_robot_settings': ('robots', lambda x: x is not None),
-    'flg_has_stock_levels': ('levels', lambda x: x is not None),
-    'flg_has_agent_lists': ('_id', lambda x: 'AVAILABLE-AGENTS' in str(x) if x else False),
-    'val_chicken_stock': ('levels.chicken.300', to_int),
-    'val_salmon_stock': ('levels.salmon.300', to_int),
-    'val_beef_stock': ('levels.beef.300', to_int),
-    'val_turkey_stock': ('levels.turkey.300', to_int),
+    'flg_has_cron_settings': ('cron', lambda x: safe_extract(x) is not None),
+    'flg_has_email_settings': ('transactionalEmails', lambda x: safe_extract(x) is not None),
+    'flg_has_sales_settings': ('sales', lambda x: safe_extract(x) is not None),
+    'flg_has_robot_settings': ('robots', lambda x: safe_extract(x) is not None),
+    'flg_has_stock_levels': ('levels', lambda x: safe_extract(x) is not None),
+    'flg_has_agent_lists': ('_id', lambda x: 'AVAILABLE-AGENTS' in str(safe_extract(x)) if safe_extract(x) else False),
+    'val_chicken_stock': ('levels.chicken.300', safe_to_int),
+    'val_salmon_stock': ('levels.salmon.300', safe_to_int),
+    'val_beef_stock': ('levels.beef.300', safe_to_int),
+    'val_turkey_stock': ('levels.turkey.300', safe_to_int),
     'des_source': (Literal('mongo'), None),
 }
 
-# FIX 2: MAPPINGS dictionary with corrected collection names (underscore → dash)
+# ============================================================================
+# FINAL MAPPINGS DICTIONARY - ALL COLLECTIONS WITH PROPER NAMES
+# ============================================================================
 MAPPINGS = {
     'customers': CUSTOMERS_MAPPING,
     'leads': LEADS_MAPPING,
@@ -1419,19 +1510,19 @@ MAPPINGS = {
     'payments': PAYMENTS_MAPPING,
     'deliveries': DELIVERIES_MAPPING,
     'coupons': COUPONS_MAPPING,
-    'users-metadata': USERS_METADATA_MAPPING,  # FIX 2: Changed from users_metadata
-    'leads-archive': LEADS_ARCHIVE_MAPPING,  # FIX 2: Changed from leads_archive
-    'contacts-logs': CONTACTS_LOGS_MAPPING,  # FIX 2: Changed from contacts_logs
+    'users-metadata': USERS_METADATA_MAPPING,
+    'leads-archive': LEADS_ARCHIVE_MAPPING,
+    'contacts-logs': CONTACTS_LOGS_MAPPING,
     'retentions': RETENTIONS_MAPPING,
     'notifications': NOTIFICATIONS_MAPPING,
     'appointments': APPOINTMENTS_MAPPING,
     'changelogs': CHANGELOGS_MAPPING,
-    'orders-archive': ORDERS_ARCHIVE_MAPPING,  # FIX 2: Changed from orders_archive
-    'payments-archive': PAYMENTS_ARCHIVE_MAPPING,  # FIX 2: Changed from payments_archive
+    'orders-archive': ORDERS_ARCHIVE_MAPPING,
+    'payments-archive': PAYMENTS_ARCHIVE_MAPPING,
     'packages': PACKAGES_MAPPING,
-    'engagement-histories': ENGAGEMENT_HISTORIES_MAPPING,  # FIX 2: Changed from engagement_histories
+    'engagement-histories': ENGAGEMENT_HISTORIES_MAPPING,
     'geocontext': GEOCONTEXT_MAPPING,
-    'invalid-phones': INVALID_PHONES_MAPPING,  # FIX 2: Changed from invalid_phones
+    'invalid-phones': INVALID_PHONES_MAPPING,
     'sysusers': SYSUSERS_MAPPING,
     'stats': STATS_MAPPING,
     'sysinfo': SYSINFO_MAPPING,

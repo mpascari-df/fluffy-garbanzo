@@ -82,6 +82,42 @@ class ParquetTransformer:
         
         print(f"[TRANSFORMATION] Starting transformation for {len(documents)} documents in collection: {self.collection_name}")
         
+        # ==================== DEBUG LOGGING ====================
+        # Log the structure of the first document to understand what we're dealing with
+        if documents:
+            first_doc = documents[0]
+            print(f"[DEBUG] First document type: {type(first_doc)}")
+            print(f"[DEBUG] First document keys: {list(first_doc.keys())[:20] if isinstance(first_doc, dict) else 'Not a dict'}")
+            
+            # Check for specific problematic fields
+            if isinstance(first_doc, dict):
+                # Check subscription fields (customers)
+                if 'subscription' in first_doc and isinstance(first_doc['subscription'], dict):
+                    sub = first_doc['subscription']
+                    print(f"[DEBUG] subscription.stripeCustId type: {type(sub.get('stripeCustId'))}")
+                    print(f"[DEBUG] subscription.statusUpdatedAt type: {type(sub.get('statusUpdatedAt'))}")
+                    print(f"[DEBUG] subscription.isMixedPlan type: {type(sub.get('isMixedPlan'))}")
+                    if 'reasonForPause' in sub:
+                        print(f"[DEBUG] subscription.reasonForPause type: {type(sub.get('reasonForPause'))}")
+                
+                # Check address fields
+                if 'address' in first_doc and isinstance(first_doc['address'], dict):
+                    addr = first_doc['address']
+                    print(f"[DEBUG] address.line2 type: {type(addr.get('line2'))}")
+                    if isinstance(addr.get('line2'), list):
+                        print(f"[DEBUG] address.line2 is ARRAY with {len(addr.get('line2'))} elements")
+                
+                # Check acquisition field
+                if 'acquisition' in first_doc:
+                    print(f"[DEBUG] acquisition type: {type(first_doc.get('acquisition'))}")
+                    if isinstance(first_doc.get('acquisition'), list):
+                        print(f"[DEBUG] acquisition is ARRAY with {len(first_doc.get('acquisition'))} elements")
+                
+                # Log a sample of the document structure (first 500 chars)
+                doc_str = json.dumps(first_doc, default=str)[:500]
+                print(f"[DEBUG] Document sample: {doc_str}...")
+        # ==================== END DEBUG LOGGING ====================
+        
         try:
             # 1. Normalize raw JSON documents into a flat pandas DataFrame.
             source_df = pd.json_normalize(documents)
@@ -147,6 +183,59 @@ class ParquetTransformer:
 def process_pubsub_message_to_parquet(message_data):
     """Process Pub/Sub message and convert to parquet"""
     try:
+        # ==================== MESSAGE STRUCTURE LOGGING ====================
+        print(f"[MESSAGE_STRUCTURE] ============ BEGIN MESSAGE ANALYSIS ============")
+        print(f"[MESSAGE_STRUCTURE] Raw message_data type: {type(message_data)}")
+        
+        if isinstance(message_data, dict):
+            print(f"[MESSAGE_STRUCTURE] Message keys: {list(message_data.keys())}")
+            
+            # Log structure of key fields
+            if 'operation' in message_data:
+                print(f"[MESSAGE_STRUCTURE] operation: {message_data['operation']}")
+            if 'collection' in message_data:
+                print(f"[MESSAGE_STRUCTURE] collection: {message_data['collection']}")
+            if 'database' in message_data:
+                print(f"[MESSAGE_STRUCTURE] database: {message_data['database']}")
+            if 'timestamp' in message_data:
+                print(f"[MESSAGE_STRUCTURE] timestamp: {message_data['timestamp']}")
+            if 'correlation_id' in message_data:
+                print(f"[MESSAGE_STRUCTURE] correlation_id: {message_data['correlation_id']}")
+            
+            # Log document structure
+            if 'document' in message_data:
+                doc = message_data['document']
+                print(f"[MESSAGE_STRUCTURE] document type: {type(doc)}")
+                if isinstance(doc, dict):
+                    print(f"[MESSAGE_STRUCTURE] document keys ({len(doc.keys())} total): {list(doc.keys())[:15]}...")
+                    
+                    # Sample specific fields that are problematic
+                    if 'subscription' in doc:
+                        print(f"[MESSAGE_STRUCTURE] document.subscription exists, type: {type(doc['subscription'])}")
+                        if isinstance(doc['subscription'], dict) and 'stripeCustId' in doc['subscription']:
+                            stripe_id = doc['subscription']['stripeCustId']
+                            print(f"[MESSAGE_STRUCTURE] document.subscription.stripeCustId type: {type(stripe_id)}, value: {stripe_id if not isinstance(stripe_id, list) else f'ARRAY[{len(stripe_id)}]'}")
+                    
+                    if '_id' in doc:
+                        print(f"[MESSAGE_STRUCTURE] document._id: {doc['_id']}")
+                        
+                elif isinstance(doc, list):
+                    print(f"[MESSAGE_STRUCTURE] document is a LIST with {len(doc)} items")
+                    if doc:
+                        print(f"[MESSAGE_STRUCTURE] First document item type: {type(doc[0])}")
+                        if isinstance(doc[0], dict):
+                            print(f"[MESSAGE_STRUCTURE] First document item keys: {list(doc[0].keys())[:10]}...")
+                            
+        elif isinstance(message_data, list):
+            print(f"[MESSAGE_STRUCTURE] Message is a LIST with {len(message_data)} items")
+            if message_data:
+                print(f"[MESSAGE_STRUCTURE] First item type: {type(message_data[0])}")
+                if isinstance(message_data[0], dict):
+                    print(f"[MESSAGE_STRUCTURE] First item keys: {list(message_data[0].keys())[:10]}...")
+        
+        print(f"[MESSAGE_STRUCTURE] ============ END MESSAGE ANALYSIS ============")
+        # ==================== END MESSAGE STRUCTURE LOGGING ====================
+        
         # Extract documents from your change stream format
         documents = []
         collection_name = "unknown"
@@ -257,6 +346,25 @@ def handle_pubsub():
     """Handle Pub/Sub push messages"""
     try:
         envelope = request.get_json()
+        
+        # ==================== PUBSUB ENVELOPE LOGGING ====================
+        print(f"[PUBSUB_ENVELOPE] ============ BEGIN PUBSUB ANALYSIS ============")
+        print(f"[PUBSUB_ENVELOPE] Envelope type: {type(envelope)}")
+        if isinstance(envelope, dict):
+            print(f"[PUBSUB_ENVELOPE] Envelope keys: {list(envelope.keys())}")
+            if 'message' in envelope:
+                message = envelope['message']
+                print(f"[PUBSUB_ENVELOPE] message keys: {list(message.keys()) if isinstance(message, dict) else 'Not a dict'}")
+                if isinstance(message, dict) and 'attributes' in message:
+                    print(f"[PUBSUB_ENVELOPE] message.attributes: {message['attributes']}")
+                if isinstance(message, dict) and 'data' in message:
+                    # Check data length before decoding
+                    data_str = message['data']
+                    print(f"[PUBSUB_ENVELOPE] message.data length: {len(data_str)} chars")
+                    print(f"[PUBSUB_ENVELOPE] message.data preview (first 100 chars): {data_str[:100]}...")
+        print(f"[PUBSUB_ENVELOPE] ============ END PUBSUB ANALYSIS ============")
+        # ==================== END PUBSUB ENVELOPE LOGGING ====================
+        
         if not envelope or 'message' not in envelope:
             print("[PUBSUB_HANDLER] Bad Request: invalid Pub/Sub message format")
             return "Bad Request: invalid Pub/Sub message format", 400
@@ -272,6 +380,27 @@ def handle_pubsub():
         message_data_str = base64.b64decode(message['data']).decode('utf-8')
         print(f"[PUBSUB_HANDLER] Decoded outer message length: {len(message_data_str)}")
 
+        # ==================== DECODED MESSAGE LOGGING ====================
+        print(f"[DECODED_MESSAGE] ============ BEGIN DECODED ANALYSIS ============")
+        print(f"[DECODED_MESSAGE] Decoded string preview (first 200 chars): {message_data_str[:200]}...")
+        
+        # Try to parse as JSON to see structure
+        try:
+            decoded_json = json.loads(message_data_str)
+            print(f"[DECODED_MESSAGE] Successfully parsed as JSON")
+            print(f"[DECODED_MESSAGE] JSON type: {type(decoded_json)}")
+            if isinstance(decoded_json, dict):
+                print(f"[DECODED_MESSAGE] JSON keys: {list(decoded_json.keys())}")
+                if 'message' in decoded_json:
+                    print(f"[DECODED_MESSAGE] Has nested 'message' key - likely CloudEvents wrapper")
+                    if isinstance(decoded_json['message'], dict) and 'data' in decoded_json['message']:
+                        print(f"[DECODED_MESSAGE] Nested message.data exists - double encoding detected")
+        except json.JSONDecodeError as e:
+            print(f"[DECODED_MESSAGE] Not valid JSON: {e}")
+        
+        print(f"[DECODED_MESSAGE] ============ END DECODED ANALYSIS ============")
+        # ==================== END DECODED MESSAGE LOGGING ====================
+
         final_payload_str = message_data_str
         # The ingestor service might wrap its payload inside another message (double-encoding).
         try:
@@ -280,6 +409,7 @@ def handle_pubsub():
                 # This is a nested payload. The real data is one level deeper.
                 print("[PUBSUB_HANDLER] Detected nested payload, extracting inner data...")
                 final_payload_str = base64.b64decode(outer_payload['message']['data']).decode('utf-8')
+                print(f"[PUBSUB_HANDLER] Extracted inner payload length: {len(final_payload_str)}")
         except json.JSONDecodeError:
             # If it's not a JSON string, it's likely the direct, non-nested payload.
             print("[PUBSUB_HANDLER] Using direct payload (not nested)")
