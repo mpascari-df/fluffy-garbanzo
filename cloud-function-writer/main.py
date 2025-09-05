@@ -24,6 +24,8 @@ def process_pubsub_message(event, context):
     Cloud Function triggered by a Pub/Sub message.
     It reads the message data, decodes it, and writes the
     JSON payload to a Google Cloud Storage bucket.
+    
+    OPTIMIZED: Writes JSON directly without unnecessary parse-serialize cycle.
 
     Args:
         event (dict): The Pub/Sub message payload.
@@ -49,7 +51,8 @@ def process_pubsub_message(event, context):
         raise RuntimeError(f"Failed to access GCS bucket: {e}")
 
     try:
-        decoded_data = None
+        final_json_str = None
+        change_event_payload = None
         
         # The Pub/Sub message data is base64-encoded.
         if 'data' in event:
@@ -60,11 +63,11 @@ def process_pubsub_message(event, context):
             # Check if the payload is a nested Pub/Sub message from a push subscription
             if 'message' in initial_payload and 'data' in initial_payload['message']:
                 # The actual payload is base64-encoded within the 'data' field of the nested 'message' object
-                decoded_data = base64.b64decode(initial_payload['message']['data']).decode('utf-8')
+                final_json_str = base64.b64decode(initial_payload['message']['data']).decode('utf-8')
                 
             # Check if the payload is a direct Pub/Sub message from a pull subscription
             elif 'collection' in initial_payload:
-                decoded_data = decoded_initial_data
+                final_json_str = decoded_initial_data
             else:
                 print("Could not find a valid payload structure. Skipping processing.")
                 return
@@ -73,8 +76,9 @@ def process_pubsub_message(event, context):
             print("Message data is missing. Skipping processing.")
             return
 
-        # Use json_util to correctly parse BSON types from MongoDB
-        change_event_payload = json_util.loads(decoded_data)
+        # OPTIMIZATION: Parse JSON ONLY to extract metadata for filenames
+        # We avoid parsing for the actual data write
+        change_event_payload = json_util.loads(final_json_str)
 
     except (base64.binascii.Error, json.JSONDecodeError, UnicodeDecodeError) as e:
         print(f"Error decoding or parsing message data: {e}")
@@ -85,7 +89,7 @@ def process_pubsub_message(event, context):
     # Generate a unique filename and GCS path based on the specified structure:
     # `raw/{collection}/{random_prefix}-{year}-{month}-{day}/{operation}_{timestamp}_{unique_id}.json`
     try:
-        # Extract metadata for filename
+        # Extract metadata for filename (this is why we still need to parse)
         collection = change_event_payload.get("collection", "unknown")
         operation = change_event_payload.get("operation", "unknown")
         
@@ -106,11 +110,10 @@ def process_pubsub_message(event, context):
                          f"{random_prefix}-{date_path}/"
                          f"{operation}_{timestamp_str}_{unique_id}.json")
         
-        # Write the formatted JSON to a temporary file
+        # OPTIMIZATION: Write the JSON string directly without re-serialization
         temp_raw_file_path = f"/tmp/{raw_file_name.replace('/', '_')}"
-        # Use json_util.dumps to handle datetime objects
         with open(temp_raw_file_path, 'w') as temp_file:
-            temp_file.write(json_util.dumps(change_event_payload, indent=2))
+            temp_file.write(final_json_str)  # Direct write - no parse/serialize!
 
         # Upload the raw data temporary file to GCS
         blob_raw = bucket.blob(raw_file_name)
@@ -118,22 +121,23 @@ def process_pubsub_message(event, context):
         print(f"Successfully wrote raw data for '{collection}' to gs://{GCS_DATA_BUCKET_NAME}/{raw_file_name}")
 
         # --- DEBUGGING FILES ---
+        # For debugging files, we keep pretty-printing since they're for human inspection
         # Construct the full GCS file path for the debugging folder
         debug_folder = "debugging"
         debug_base_path = f"{debug_folder}/{collection}/{random_prefix}-{date_path}/{timestamp_str}_{unique_id}"
 
-        # 1. Write the full event payload to a debug file
+        # 1. Write the full event payload to a debug file (pretty-printed for debugging)
         temp_event_file_path = f"/tmp/{debug_base_path.replace('/', '_')}_event.json"
         with open(temp_event_file_path, 'w') as temp_file:
-            json.dump(event, temp_file, indent=2)
+            json.dump(event, temp_file, indent=2)  # Keep pretty-print for debug
         blob_event = bucket.blob(f"{debug_base_path}_event.json")
         blob_event.upload_from_filename(temp_event_file_path)
         print(f"Successfully wrote event payload to gs://{GCS_DATA_BUCKET_NAME}/{blob_event.name}")
 
-        # 2. Write the decoded data to a debug file (this will be the final payload)
+        # 2. Write the decoded data to a debug file (pretty-printed for human readability)
         temp_decoded_file_path = f"/tmp/{debug_base_path.replace('/', '_')}_decoded.json"
-        # Use json_util.dumps to handle datetime objects
         with open(temp_decoded_file_path, 'w') as temp_file:
+            # For debug file, we pretty-print for human inspection
             temp_file.write(json_util.dumps(change_event_payload, indent=2))
         blob_decoded = bucket.blob(f"{debug_base_path}_decoded.json")
         blob_decoded.upload_from_filename(temp_decoded_file_path)
