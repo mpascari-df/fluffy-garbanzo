@@ -976,7 +976,7 @@ _sysinfo_schema = pa.schema([
     pa.field('des_source', pa.string()),
 ])
 
-# Define the SCHEMAS dictionary with all collections
+# FIX 2: Define the SCHEMAS dictionary with corrected collection names (underscore → dash)
 SCHEMAS = {
     # Existing implementations
     'customers': _customers_schema,
@@ -985,21 +985,21 @@ SCHEMAS = {
     'payments': _payments_schema,
     'deliveries': _deliveries_schema,
     'coupons': _coupons_schema,
-    'users_metadata': _users_metadata_schema,  # Fixed: was users-metadata
-    'leads_archive': _leads_archive_schema,  # Fixed: was leads-archive
-    'contacts_logs': _contacts_logs_schema,  # Fixed: was contacts-logs
+    'users-metadata': _users_metadata_schema,  # FIX 2: Changed from users_metadata
+    'leads-archive': _leads_archive_schema,  # FIX 2: Changed from leads_archive
+    'contacts-logs': _contacts_logs_schema,  # FIX 2: Changed from contacts_logs
     'retentions': _retentions_schema,
     'notifications': _notifications_schema,
     'appointments': _appointments_schema,
     
     # New implementations
     'changelogs': _changelogs_schema,
-    'orders_archive': _orders_archive_schema,  # Fixed: was orders-archive
-    'payments_archive': _payments_archive_schema,  # Fixed: was payments-archive
+    'orders-archive': _orders_archive_schema,  # FIX 2: Changed from orders_archive
+    'payments-archive': _payments_archive_schema,  # FIX 2: Changed from payments_archive
     'packages': _packages_schema,
-    'engagement_histories': _engagement_histories_schema,  # Fixed: was engagement-histories
+    'engagement-histories': _engagement_histories_schema,  # FIX 2: Changed from engagement_histories
     'geocontext': _geocontext_schema,
-    'invalid_phones': _invalid_phones_schema,  # Fixed: was invalid-phones
+    'invalid-phones': _invalid_phones_schema,  # FIX 2: Changed from invalid_phones
     'sysusers': _sysusers_schema,
     'stats': _stats_schema,
     'sysinfo': _sysinfo_schema,

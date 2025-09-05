@@ -93,6 +93,32 @@ def get_latest_comment_date(comments_array):
                 continue
     return latest_date
 
+# FIX 3: Helper function for stripeCustId array handling
+def extract_stripe_customer_id(stripe_cust_id):
+    """
+    Extract Stripe Customer ID from field that might be a string or array.
+    If array, takes the first non-null value.
+    
+    This handles the case where subscription.stripeCustId is sometimes an array
+    instead of a single value, which was causing "ambiguous truth value" errors.
+    """
+    if stripe_cust_id is None:
+        return None
+    
+    # If it's a list/array
+    if isinstance(stripe_cust_id, (list, tuple)):
+        # Return first non-null, non-empty value if exists
+        for val in stripe_cust_id:
+            if val is not None and val != '':
+                return str(val)
+        return None
+    
+    # If it's already a string or other single value
+    if stripe_cust_id == '':
+        return None
+    
+    return str(stripe_cust_id)
+
 # Helper functions for orders
 def extract_bag_totals(content_obj):
     """Extract total bags from content.bagList structure"""
@@ -755,8 +781,8 @@ LEADS_MAPPING = {
     'des_acquisition_source_first': ('acquisition.first.source', None),
     'des_acquisition_source_last': ('acquisition.last.source', None),
 
-    # Subscription data
-    'fk_stripe_customer_lead': ('subscription.stripeCustId', None),
+    # Subscription data - FIX 3: Using the new helper function to handle array cases
+    'fk_stripe_customer_lead': ('subscription.stripeCustId', extract_stripe_customer_id),
     'cod_pricing_factor': ('subscription.pricingFactor', None),
     'ts_initial_payment_attempted': ('subscription.initialPaymentAttemptedAt', to_timestamp),
     'cod_stripe_payment_id': ('subscription.stripePaymentId', None),
@@ -1013,7 +1039,7 @@ COUPONS_MAPPING = {
 USERS_METADATA_MAPPING = {
     'pk_user_metadata': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
-    'des_data_origin': (Literal('users_metadata'), None),
+    'des_data_origin': (Literal('users-metadata'), None),  # FIX 2: Changed from users_metadata
     'fk_customer': ('_id', to_string),
     'txt_password_hash': ('password', None),
     'cod_verification_token': ('verificationToken', None),
@@ -1028,7 +1054,7 @@ USERS_METADATA_MAPPING = {
 LEADS_ARCHIVE_MAPPING = {
     'pk_lead_archive': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
-    'des_data_origin': (Literal('leads_archive'), None),
+    'des_data_origin': (Literal('leads-archive'), None),  # FIX 2: Changed from leads_archive
     'fk_lead': ('_id', to_string),
     'ts_lead_created_at': ('createdAt', to_timestamp),
     'ts_lead_updated_at': ('leadUpdatedAt', to_timestamp),
@@ -1077,7 +1103,7 @@ LEADS_ARCHIVE_MAPPING = {
 CONTACTS_LOGS_MAPPING = {
     'pk_contact_log': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
-    'des_data_origin': (Literal('contacts_logs'), None),
+    'des_data_origin': (Literal('contacts-logs'), None),  # FIX 2: Changed from contacts_logs
     'fk_lead': ('_id', to_string),
     'ts_created_at': ('createdAt', to_timestamp),
     'ts_updated_at': ('updatedAt', to_timestamp),
@@ -1178,7 +1204,7 @@ CHANGELOGS_MAPPING = {
 ORDERS_ARCHIVE_MAPPING = {
     'pk_order': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
-    'des_data_origin': (Literal('orders_archive'), None),
+    'des_data_origin': (Literal('orders-archive'), None),  # FIX 2: Changed from orders_archive
     'fk_customer': ('custId', None),
     'cod_payment': ('payment', None),
     'des_full_name': ('fullName', None),
@@ -1228,7 +1254,7 @@ ORDERS_ARCHIVE_MAPPING = {
 PAYMENTS_ARCHIVE_MAPPING = {
     'pk_payment': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
-    'des_data_origin': (Literal('payments_archive'), None),
+    'des_data_origin': (Literal('payments-archive'), None),  # FIX 2: Changed from payments_archive
     'fk_customer': ('custId', None),
     'val_linked_orders_count': ('orders', count_array_items),
     'txt_linked_order_ids': ('orders', extract_linked_order_ids),
@@ -1285,7 +1311,7 @@ PACKAGES_MAPPING = {
 ENGAGEMENT_HISTORIES_MAPPING = {
     'pk_engagement': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
-    'des_data_origin': (Literal('engagement_histories'), None),
+    'des_data_origin': (Literal('engagement-histories'), None),  # FIX 2: Changed from engagement_histories
     'ts_created_at': ('createdAt', to_timestamp),
     'ts_updated_at': ('updatedAt', to_timestamp),
     'flg_survey_engaged': ('cust.tests.customerDataSurvey.isEngaged', to_bool),
@@ -1310,7 +1336,7 @@ GEOCONTEXT_MAPPING = {
 INVALID_PHONES_MAPPING = {
     'pk_phone': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
-    'des_data_origin': (Literal('invalid_phones'), None),
+    'des_data_origin': (Literal('invalid-phones'), None),  # FIX 2: Changed from invalid_phones
     'des_phone_number': ('_id', to_string),
     'des_country': ('country', None),
     'des_created_by': ('createdBy', None),
@@ -1385,7 +1411,7 @@ SYSINFO_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# MAPPINGS dictionary
+# FIX 2: MAPPINGS dictionary with corrected collection names (underscore → dash)
 MAPPINGS = {
     'customers': CUSTOMERS_MAPPING,
     'leads': LEADS_MAPPING,
@@ -1393,19 +1419,19 @@ MAPPINGS = {
     'payments': PAYMENTS_MAPPING,
     'deliveries': DELIVERIES_MAPPING,
     'coupons': COUPONS_MAPPING,
-    'users_metadata': USERS_METADATA_MAPPING,
-    'leads_archive': LEADS_ARCHIVE_MAPPING,
-    'contacts_logs': CONTACTS_LOGS_MAPPING,
+    'users-metadata': USERS_METADATA_MAPPING,  # FIX 2: Changed from users_metadata
+    'leads-archive': LEADS_ARCHIVE_MAPPING,  # FIX 2: Changed from leads_archive
+    'contacts-logs': CONTACTS_LOGS_MAPPING,  # FIX 2: Changed from contacts_logs
     'retentions': RETENTIONS_MAPPING,
     'notifications': NOTIFICATIONS_MAPPING,
     'appointments': APPOINTMENTS_MAPPING,
     'changelogs': CHANGELOGS_MAPPING,
-    'orders_archive': ORDERS_ARCHIVE_MAPPING,
-    'payments_archive': PAYMENTS_ARCHIVE_MAPPING,
+    'orders-archive': ORDERS_ARCHIVE_MAPPING,  # FIX 2: Changed from orders_archive
+    'payments-archive': PAYMENTS_ARCHIVE_MAPPING,  # FIX 2: Changed from payments_archive
     'packages': PACKAGES_MAPPING,
-    'engagement_histories': ENGAGEMENT_HISTORIES_MAPPING,
+    'engagement-histories': ENGAGEMENT_HISTORIES_MAPPING,  # FIX 2: Changed from engagement_histories
     'geocontext': GEOCONTEXT_MAPPING,
-    'invalid_phones': INVALID_PHONES_MAPPING,
+    'invalid-phones': INVALID_PHONES_MAPPING,  # FIX 2: Changed from invalid_phones
     'sysusers': SYSUSERS_MAPPING,
     'stats': STATS_MAPPING,
     'sysinfo': SYSINFO_MAPPING,
