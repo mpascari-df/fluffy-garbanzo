@@ -1,7 +1,7 @@
 """
 Transformation module that applies field mappings and transformations
 to convert raw MongoDB documents into the target schema format.
-UPDATED: Added resilient validation that logs issues but continues processing.
+UPDATED: Added resilient validation and better handling of callable mappings.
 """
 
 import pandas as pd
@@ -62,8 +62,10 @@ def apply_transformations(source_df, collection_name):
     """
     mapping = get_collection_mapping(collection_name)
     if not mapping:
-        print(f"No mapping found for collection: {collection_name}")
+        print(f"[TRANSFORMATION] No mapping found for collection: {collection_name}")
         return pd.DataFrame()
+    
+    print(f"[TRANSFORMATION] Starting transformation for {len(source_df)} rows in collection: {collection_name}")
     
     # Initialize result dictionary to store transformed data
     result_data = {}
@@ -73,16 +75,66 @@ def apply_transformations(source_df, collection_name):
         # Convert row to dict for easier nested access
         row_dict = row.to_dict()
         
+        # Reconstruct original document from normalized row for nested access
+        original_doc = {}
+        for col in row_dict:
+            if pd.notna(row_dict[col]):
+                # Handle nested field reconstruction
+                if '.' in col:
+                    keys = col.split('.')
+                    current = original_doc
+                    for key in keys[:-1]:
+                        if key not in current:
+                            current[key] = {}
+                        elif not isinstance(current[key], dict):
+                            # Field exists but isn't a dict, skip this path
+                            break
+                        current = current[key]
+                    if isinstance(current, dict):
+                        current[keys[-1]] = row_dict[col]
+                else:
+                    original_doc[col] = row_dict[col]
+        
         # Apply each mapping rule
-        for target_field, (source_spec, transform_func) in mapping.items():
+        for target_field, mapping_spec in mapping.items():
             try:
+                # Handle the mapping specification format (source_spec, transform_func)
+                if isinstance(mapping_spec, tuple) and len(mapping_spec) == 2:
+                    source_spec, transform_func = mapping_spec
+                else:
+                    # If it's not a tuple, treat it as source_spec with no transform
+                    source_spec = mapping_spec
+                    transform_func = None
+                
                 # Extract source value based on specification type
                 if callable(source_spec):
-                    # Lambda function (e.g., lambda: datetime.now().strftime("%Y%m"))
-                    source_value = source_spec()
+                    # Check if it's a lambda that expects a document argument
+                    import inspect
+                    try:
+                        sig = inspect.signature(source_spec)
+                        num_params = len(sig.parameters)
+                        
+                        if num_params == 0:
+                            # No parameters (like datetime.now())
+                            source_value = source_spec()
+                        else:
+                            # Has parameters, pass the document
+                            # Use original_doc which has the nested structure
+                            source_value = source_spec(original_doc)
+                    except (TypeError, ValueError):
+                        # If we can't inspect, try with document first, then without
+                        try:
+                            source_value = source_spec(original_doc)
+                        except (TypeError, KeyError):
+                            try:
+                                source_value = source_spec()
+                            except:
+                                source_value = None
+                                
                 elif isinstance(source_spec, Literal):
                     # Literal value
                     source_value = source_spec.value
+                    
                 elif isinstance(source_spec, str):
                     # Field path - check both flattened and nested access
                     if source_spec in row_dict:
@@ -90,26 +142,17 @@ def apply_transformations(source_df, collection_name):
                         source_value = row_dict[source_spec]
                     else:
                         # Try nested access on original document
-                        # Reconstruct original document from normalized row
-                        original_doc = {}
-                        for col in row_dict:
-                            if pd.notna(row_dict[col]):
-                                # Handle nested field reconstruction
-                                keys = col.split('.')
-                                current = original_doc
-                                for key in keys[:-1]:
-                                    if key not in current:
-                                        current[key] = {}
-                                    current = current[key]
-                                current[keys[-1]] = row_dict[col]
-                        
                         source_value = get_nested_value(original_doc, source_spec)
                 else:
                     source_value = None
                 
-                # Apply transformation function if provided
+                # Apply transformation function if provided and value is not None
                 if transform_func and source_value is not None:
-                    transformed_value = transform_func(source_value)
+                    try:
+                        transformed_value = transform_func(source_value)
+                    except Exception as e:
+                        print(f"[TRANSFORMATION] Transform function failed for {target_field}: {e}")
+                        transformed_value = None
                 else:
                     transformed_value = source_value
                 
@@ -119,7 +162,7 @@ def apply_transformations(source_df, collection_name):
                 result_data[target_field].append(transformed_value)
                 
             except Exception as e:
-                print(f"Error processing field {target_field} for {source_spec}: {e}")
+                print(f"[TRANSFORMATION] Error processing field {target_field}: {e}")
                 # Add None for failed transformations
                 if target_field not in result_data:
                     result_data[target_field] = []
@@ -135,9 +178,9 @@ def apply_transformations(source_df, collection_name):
     # Convert to DataFrame
     transformed_df = pd.DataFrame(result_data)
     
-    print(f"Transformed {len(source_df)} rows into {len(transformed_df)} rows for collection: {collection_name}")
+    print(f"[TRANSFORMATION] Transformed {len(source_df)} rows into {len(transformed_df)} rows for collection: {collection_name}")
     if not transformed_df.empty:
-        print(f"Output columns: {list(transformed_df.columns)}")
+        print(f"[TRANSFORMATION] Output columns ({len(transformed_df.columns)}): {list(transformed_df.columns)[:10]}...")
     
     return transformed_df
 
@@ -216,14 +259,25 @@ def validate_transformation_result(df, schema):
                         try:
                             # Try to cast this specific column
                             test_series = fixed_df[field.name]
-                            if field.type == pa.string():
-                                fixed_df[field.name] = test_series.astype(str, errors='ignore')
+                            
+                            # Special handling for timestamp fields
+                            if pa.types.is_timestamp(field.type):
+                                # Try to convert to datetime, handling various formats
+                                fixed_df[field.name] = pd.to_datetime(test_series, errors='coerce')
+                            elif field.type == pa.string():
+                                # Convert to string, handling None values
+                                fixed_df[field.name] = test_series.apply(
+                                    lambda x: str(x) if x is not None else None
+                                )
                             elif field.type == pa.int64():
-                                fixed_df[field.name] = pd.to_numeric(test_series, errors='coerce')
+                                fixed_df[field.name] = pd.to_numeric(test_series, errors='coerce').astype('Int64')
                             elif field.type == pa.float64():
                                 fixed_df[field.name] = pd.to_numeric(test_series, errors='coerce')
                             elif field.type == pa.bool_():
-                                fixed_df[field.name] = test_series.astype(bool, errors='ignore')
+                                # Handle bool conversion more carefully
+                                fixed_df[field.name] = test_series.apply(
+                                    lambda x: bool(x) if x is not None else None
+                                )
                             # Add more type handling as needed
                         except Exception as col_error:
                             # If casting fails, set to None

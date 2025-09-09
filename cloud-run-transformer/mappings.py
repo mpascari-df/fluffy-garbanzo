@@ -102,6 +102,29 @@ def safe_to_timestamp(value):
     return to_timestamp(extracted)
 
 # ============================================================================
+# SAFE FIELD EXTRACTOR HELPER
+# ============================================================================
+def safe_field_extractor(path, transform_func=None):
+    """
+    Create a safe extractor for a field path that handles arrays and nested structures.
+    
+    Args:
+        path: Dot-separated path to the field
+        transform_func: Optional transformation function to apply
+        
+    Returns:
+        A function that safely extracts and transforms the field
+    """
+    def extractor(doc):
+        if not isinstance(doc, dict):
+            return None
+        value = safe_nested_extract(doc, path)
+        if transform_func and value is not None:
+            return transform_func(value)
+        return value
+    return extractor
+
+# ============================================================================
 # ORIGINAL TYPE CONVERSION HELPERS
 # ============================================================================
 def to_timestamp(date_str):
@@ -155,39 +178,45 @@ def to_bool(val):
 # --- Customers/Leads Helpers ---
 def count_array_items(arr):
     """Count items in an array field"""
+    arr = safe_extract(arr)
     if arr is None or not isinstance(arr, list):
         return 0
     return len(arr)
 
 def extract_dog_names(dogs_array):
     """Extract comma-separated dog names from dogs array"""
+    dogs_array = safe_extract(dogs_array)
     if not dogs_array or not isinstance(dogs_array, list):
         return ""
-    names = [dog.get('name', '') for dog in dogs_array if isinstance(dog, dict)]
+    names = [safe_extract(dog.get('name', '')) for dog in dogs_array if isinstance(dog, dict)]
     return ", ".join(filter(None, names))
 
 def sum_dog_weights(dogs_array):
     """Sum weights from dogs array"""
+    dogs_array = safe_extract(dogs_array)
     if not dogs_array or not isinstance(dogs_array, list):
         return None
     total = 0
     for dog in dogs_array:
         if isinstance(dog, dict) and 'weight' in dog:
             try:
-                total += float(dog['weight'])
+                weight = safe_extract(dog['weight'])
+                if weight:
+                    total += float(weight)
             except (ValueError, TypeError):
                 continue
     return total if total > 0 else None
 
 def get_latest_comment_date(comments_array):
     """Get the latest date from internal comments array"""
+    comments_array = safe_extract(comments_array)
     if not comments_array or not isinstance(comments_array, list):
         return None
     latest_date = None
     for comment in comments_array:
         if isinstance(comment, dict) and 'date' in comment:
             try:
-                comment_date = to_timestamp(comment['date'])
+                comment_date = to_timestamp(safe_extract(comment['date']))
                 if comment_date and (latest_date is None or comment_date > latest_date):
                     latest_date = comment_date
             except:
@@ -202,164 +231,184 @@ def check_has_acquisition(acquisition_obj):
 # --- Orders Helpers ---
 def extract_bag_totals(content_obj):
     """Extract total bags from content.bagList structure"""
+    content_obj = safe_extract(content_obj)
     if not content_obj or not isinstance(content_obj, dict):
         return 0
     
-    bag_list = content_obj.get('bagList', {})
+    bag_list = safe_extract(content_obj.get('bagList', {}))
     if not isinstance(bag_list, dict):
         return 0
     
     total = 0
     for bag_size, meats in bag_list.items():
         if isinstance(meats, dict):
-            total += sum(meats.values())
+            for meat_count in meats.values():
+                total += safe_to_int(meat_count) or 0
     return total
 
 def extract_meat_totals(content_obj, meat_type):
     """Extract total bags for specific meat type from content.bagList"""
+    content_obj = safe_extract(content_obj)
     if not content_obj or not isinstance(content_obj, dict):
         return 0
     
-    bag_list = content_obj.get('bagList', {})
+    bag_list = safe_extract(content_obj.get('bagList', {}))
     if not isinstance(bag_list, dict):
         return 0
     
     total = 0
     for bag_size, meats in bag_list.items():
         if isinstance(meats, dict) and meat_type in meats:
-            total += meats[meat_type]
+            total += safe_to_int(meats[meat_type]) or 0
     return total
 
 def extract_bag_size_count(content_obj, size):
     """Extract count of bags for specific size from content.bagList"""
+    content_obj = safe_extract(content_obj)
     if not content_obj or not isinstance(content_obj, dict):
         return 0
     
-    bag_list = content_obj.get('bagList', {})
+    bag_list = safe_extract(content_obj.get('bagList', {}))
     if not isinstance(bag_list, dict):
         return 0
     
     size_data = bag_list.get(str(size), {})
     if isinstance(size_data, dict):
-        return sum(size_data.values())
+        total = 0
+        for count in size_data.values():
+            total += safe_to_int(count) or 0
+        return total
     return 0
 
 def extract_handlers_count(package_obj):
     """Count handlers from package.handlers array"""
+    package_obj = safe_extract(package_obj)
     if not package_obj or not isinstance(package_obj, dict):
         return 0
     
-    handlers = package_obj.get('handlers', [])
+    handlers = safe_extract(package_obj.get('handlers', []))
     return len(handlers) if isinstance(handlers, list) else 0
 
 def count_extras(content_obj):
     """Count extras from content.extras array"""
+    content_obj = safe_extract(content_obj)
     if not content_obj or not isinstance(content_obj, dict):
         return 0
-    extras = content_obj.get('extras', [])
+    extras = safe_extract(content_obj.get('extras', []))
     return len(extras) if isinstance(extras, list) else 0
 
 def count_additional_extras(content_obj):
     """Count additional extras from content.additionalExtras array"""
+    content_obj = safe_extract(content_obj)
     if not content_obj or not isinstance(content_obj, dict):
         return 0
-    extras = content_obj.get('additionalExtras', [])
+    extras = safe_extract(content_obj.get('additionalExtras', []))
     return len(extras) if isinstance(extras, list) else 0
 
 # --- Payments Helpers ---
 def extract_line_items_count(line_items):
     """Count line items"""
+    line_items = safe_extract(line_items)
     if not line_items or not isinstance(line_items, list):
         return 0
     return len(line_items)
 
 def extract_total_product_qty(line_items):
     """Sum quantities from line items"""
+    line_items = safe_extract(line_items)
     if not line_items or not isinstance(line_items, list):
         return 0
     
     total = 0
     for item in line_items:
         if isinstance(item, dict) and 'qty' in item:
-            try:
-                total += int(item['qty'])
-            except (ValueError, TypeError):
-                continue
+            qty = safe_to_int(item['qty'])
+            if qty:
+                total += qty
     return total
 
 def extract_total_product_grams(line_items):
     """Sum total grams from line items (qty * unitGrams)"""
+    line_items = safe_extract(line_items)
     if not line_items or not isinstance(line_items, list):
         return 0
     
     total = 0
     for item in line_items:
         if isinstance(item, dict) and 'qty' in item and 'unitGrams' in item:
-            try:
-                qty = int(item['qty'])
-                unit_grams = int(item['unitGrams'])
+            qty = safe_to_int(item['qty'])
+            unit_grams = safe_to_int(item['unitGrams'])
+            if qty and unit_grams:
                 total += qty * unit_grams
-            except (ValueError, TypeError):
-                continue
     return total
 
 def extract_line_items_total_amount(line_items):
     """Sum total amount from line items (qty * unitAmount)"""
+    line_items = safe_extract(line_items)
     if not line_items or not isinstance(line_items, list):
         return 0.0
     
     total = 0.0
     for item in line_items:
         if isinstance(item, dict) and 'qty' in item and 'unitAmount' in item:
-            try:
-                qty = int(item['qty'])
-                unit_amount = float(item['unitAmount'])
+            qty = safe_to_int(item['qty'])
+            unit_amount = safe_to_float(item['unitAmount'])
+            if qty and unit_amount:
                 total += qty * unit_amount
-            except (ValueError, TypeError):
-                continue
     return total
 
 def extract_products_list(line_items):
     """Extract comma-separated product names"""
+    line_items = safe_extract(line_items)
     if not line_items or not isinstance(line_items, list):
         return ""
     
     products = []
     for item in line_items:
         if isinstance(item, dict) and 'product' in item:
-            products.append(str(item['product']))
+            product = safe_extract(item['product'])
+            if product:
+                products.append(str(product))
     
     return ", ".join(products)
 
 def extract_linked_order_ids(orders_array):
     """Extract comma-separated order IDs"""
+    orders_array = safe_extract(orders_array)
     if not orders_array or not isinstance(orders_array, list):
         return ""
     
-    return ", ".join(str(order_id) for order_id in orders_array)
+    order_ids = []
+    for order_id in orders_array:
+        id_val = safe_extract(order_id)
+        if id_val:
+            order_ids.append(str(id_val))
+    return ", ".join(order_ids)
 
 def extract_refunds_count(refunds_array):
     """Count refunds"""
+    refunds_array = safe_extract(refunds_array)
     if not refunds_array or not isinstance(refunds_array, list):
         return 0
     return len(refunds_array)
 
 def extract_total_refund_amount(refunds_array):
     """Sum refund amounts"""
+    refunds_array = safe_extract(refunds_array)
     if not refunds_array or not isinstance(refunds_array, list):
         return 0.0
     
     total = 0.0
     for refund in refunds_array:
         if isinstance(refund, dict) and 'amount' in refund:
-            try:
-                total += float(refund['amount'])
-            except (ValueError, TypeError):
-                continue
+            amount = safe_to_float(refund['amount'])
+            if amount:
+                total += amount
     return total
 
 def extract_latest_refund_status(refunds_array):
     """Get status of most recent refund"""
+    refunds_array = safe_extract(refunds_array)
     if not refunds_array or not isinstance(refunds_array, list):
         return None
     
@@ -368,18 +417,16 @@ def extract_latest_refund_status(refunds_array):
     
     for refund in refunds_array:
         if isinstance(refund, dict) and 'createdAt' in refund:
-            try:
-                created_at = to_timestamp(refund['createdAt'])
-                if created_at and (latest_date is None or created_at > latest_date):
-                    latest_date = created_at
-                    latest_refund = refund
-            except:
-                continue
+            created_at = to_timestamp(safe_extract(refund['createdAt']))
+            if created_at and (latest_date is None or created_at > latest_date):
+                latest_date = created_at
+                latest_refund = refund
     
-    return latest_refund.get('status') if latest_refund else None
+    return safe_extract(latest_refund.get('status')) if latest_refund else None
 
 def extract_latest_refund_reason(refunds_array):
     """Get reason category of most recent refund"""
+    refunds_array = safe_extract(refunds_array)
     if not refunds_array or not isinstance(refunds_array, list):
         return None
     
@@ -388,16 +435,15 @@ def extract_latest_refund_reason(refunds_array):
     
     for refund in refunds_array:
         if isinstance(refund, dict) and 'createdAt' in refund:
-            try:
-                created_at = to_timestamp(refund['createdAt'])
-                if created_at and (latest_date is None or created_at > latest_date):
-                    latest_date = created_at
-                    latest_refund = refund
-            except:
-                continue
+            created_at = to_timestamp(safe_extract(refund['createdAt']))
+            if created_at and (latest_date is None or created_at > latest_date):
+                latest_date = created_at
+                latest_refund = refund
     
-    if latest_refund and 'reason' in latest_refund and isinstance(latest_refund['reason'], dict):
-        return latest_refund['reason'].get('category')
+    if latest_refund and 'reason' in latest_refund:
+        reason = safe_extract(latest_refund['reason'])
+        if isinstance(reason, dict):
+            return safe_extract(reason.get('category'))
     return None
 
 # --- Deliveries Helpers ---
@@ -416,38 +462,44 @@ def get_label_data_length(label_data):
 # --- Leads Archive Helpers ---
 def extract_sales_status(sales_obj):
     """Extract status from sales object"""
+    sales_obj = safe_extract(sales_obj)
     if not sales_obj or not isinstance(sales_obj, dict):
         return None
     return safe_extract(sales_obj.get('status'))
 
 def extract_sales_assigned_at(sales_obj):
     """Extract assignedAt timestamp from sales object"""
+    sales_obj = safe_extract(sales_obj)
     if not sales_obj or not isinstance(sales_obj, dict):
         return None
     return safe_to_timestamp(sales_obj.get('assignedAt'))
 
 def extract_sales_reassignment_count(sales_obj):
     """Extract reassignmentCount from sales object"""
+    sales_obj = safe_extract(sales_obj)
     if not sales_obj or not isinstance(sales_obj, dict):
         return 0
     return safe_to_int(sales_obj.get('reassignmentCount', 0)) or 0
 
 def extract_sales_comments_count(sales_obj):
     """Count comments from sales object"""
+    sales_obj = safe_extract(sales_obj)
     if not sales_obj or not isinstance(sales_obj, dict):
         return 0
-    comments = sales_obj.get('comments', [])
+    comments = safe_extract(sales_obj.get('comments', []))
     return len(comments) if isinstance(comments, list) else 0
 
 # --- Contacts Logs Helpers ---
 def extract_logs_count(logs_array):
     """Count number of communication logs"""
+    logs_array = safe_extract(logs_array)
     if not logs_array or not isinstance(logs_array, list):
         return 0
     return len(logs_array)
 
 def extract_last_log_type(logs_array):
     """Extract event type of the last log entry"""
+    logs_array = safe_extract(logs_array)
     if not logs_array or not isinstance(logs_array, list) or len(logs_array) == 0:
         return None
     
@@ -458,6 +510,7 @@ def extract_last_log_type(logs_array):
 
 def extract_last_log_direction(logs_array):
     """Extract direction of the last log entry"""
+    logs_array = safe_extract(logs_array)
     if not logs_array or not isinstance(logs_array, list) or len(logs_array) == 0:
         return None
     
@@ -468,6 +521,7 @@ def extract_last_log_direction(logs_array):
 
 def extract_last_log_status(logs_array):
     """Extract status of the last log entry"""
+    logs_array = safe_extract(logs_array)
     if not logs_array or not isinstance(logs_array, list) or len(logs_array) == 0:
         return None
     
@@ -478,6 +532,7 @@ def extract_last_log_status(logs_array):
 
 def extract_last_log_agent(logs_array):
     """Extract agent ID of the last log entry"""
+    logs_array = safe_extract(logs_array)
     if not logs_array or not isinstance(logs_array, list) or len(logs_array) == 0:
         return None
     
@@ -488,6 +543,7 @@ def extract_last_log_agent(logs_array):
 
 def extract_last_log_timestamp(logs_array):
     """Extract timestamp of the last log entry"""
+    logs_array = safe_extract(logs_array)
     if not logs_array or not isinstance(logs_array, list) or len(logs_array) == 0:
         return None
     
@@ -498,6 +554,7 @@ def extract_last_log_timestamp(logs_array):
 
 def extract_last_log_duration(logs_array):
     """Extract duration of the last log entry"""
+    logs_array = safe_extract(logs_array)
     if not logs_array or not isinstance(logs_array, list) or len(logs_array) == 0:
         return None
     
@@ -508,20 +565,21 @@ def extract_last_log_duration(logs_array):
 
 def extract_total_duration(logs_array):
     """Sum duration from all log entries"""
+    logs_array = safe_extract(logs_array)
     if not logs_array or not isinstance(logs_array, list):
         return 0
     
     total = 0
     for log in logs_array:
         if isinstance(log, dict) and 'duration' in log:
-            try:
-                total += int(safe_extract(log['duration'], 0))
-            except (ValueError, TypeError):
-                continue
+            duration = safe_to_int(log['duration'])
+            if duration:
+                total += duration
     return total
 
 def extract_call_count(logs_array):
     """Count number of calls in logs"""
+    logs_array = safe_extract(logs_array)
     if not logs_array or not isinstance(logs_array, list):
         return 0
     
@@ -533,6 +591,7 @@ def extract_call_count(logs_array):
 
 def extract_email_count(logs_array):
     """Count number of emails in logs"""
+    logs_array = safe_extract(logs_array)
     if not logs_array or not isinstance(logs_array, list):
         return 0
     
@@ -544,6 +603,7 @@ def extract_email_count(logs_array):
 
 def extract_sms_count(logs_array):
     """Count number of SMS in logs"""
+    logs_array = safe_extract(logs_array)
     if not logs_array or not isinstance(logs_array, list):
         return 0
     
@@ -556,33 +616,43 @@ def extract_sms_count(logs_array):
 # --- Retentions Helpers ---
 def extract_contact_channels_count(channels_array):
     """Count number of contact channels"""
+    channels_array = safe_extract(channels_array)
     if not channels_array or not isinstance(channels_array, list):
         return 0
     return len(channels_array)
 
 def extract_contact_channels_list(channels_array):
     """Extract comma-separated list of contact channels"""
+    channels_array = safe_extract(channels_array)
     if not channels_array or not isinstance(channels_array, list):
         return ""
-    return ", ".join(str(safe_extract(channel)) for channel in channels_array if safe_extract(channel))
+    channels = []
+    for channel in channels_array:
+        ch = safe_extract(channel)
+        if ch:
+            channels.append(str(ch))
+    return ", ".join(channels)
 
 def extract_reason_category(reason_obj):
     """Extract category from reasonForPause object"""
+    reason_obj = safe_extract(reason_obj)
     if not reason_obj or not isinstance(reason_obj, dict):
         return None
     return safe_extract(reason_obj.get('category'))
 
 def extract_reason_subcategory(reason_obj):
     """Extract subcategory from reasonForPause object"""
+    reason_obj = safe_extract(reason_obj)
     if not reason_obj or not isinstance(reason_obj, dict):
         return None
     return safe_extract(reason_obj.get('subcategory'))
 
 def extract_comeback_probability(reason_obj):
     """Extract comeback probability from reasonForPause object"""
+    reason_obj = safe_extract(reason_obj)
     if not reason_obj or not isinstance(reason_obj, dict):
         return None
-    prob = reason_obj.get('comebackProbab')
+    prob = safe_extract(reason_obj.get('comebackProbab'))
     return safe_to_float(prob) if prob is not None else None
 
 # --- Notifications Helpers ---
@@ -607,6 +677,7 @@ def extract_entity_type(entity_id):
 
 def count_changes_by_actor(logs_array, actor_name):
     """Count changes made by specific actor"""
+    logs_array = safe_extract(logs_array)
     if not logs_array or not isinstance(logs_array, list):
         return 0
     
@@ -618,12 +689,13 @@ def count_changes_by_actor(logs_array, actor_name):
 
 def get_latest_change_info(logs_array):
     """Get info about the most recent change"""
+    logs_array = safe_extract(logs_array)
     if not logs_array or not isinstance(logs_array, list) or len(logs_array) == 0:
         return None, None, None
     
     # Sort by createdAt to get latest
     sorted_logs = sorted(logs_array, 
-                        key=lambda x: safe_extract(x.get('createdAt', '')), 
+                        key=lambda x: safe_extract(x.get('createdAt', '')) or '', 
                         reverse=True)
     
     if sorted_logs:
@@ -636,6 +708,7 @@ def get_latest_change_info(logs_array):
 
 def extract_top_changed_fields(logs_array, top_n=3):
     """Extract the most frequently changed fields"""
+    logs_array = safe_extract(logs_array)
     if not logs_array or not isinstance(logs_array, list):
         return ""
     
@@ -655,6 +728,7 @@ def extract_top_changed_fields(logs_array, top_n=3):
 
 def count_unique_fields(logs_array):
     """Count unique fields that were changed"""
+    logs_array = safe_extract(logs_array)
     if not logs_array or not isinstance(logs_array, list):
         return 0
     
@@ -697,28 +771,19 @@ def extract_agent_from_stat_id(stat_id):
 # --- Sysusers Helpers ---
 def join_array_as_string(arr):
     """Join array elements as comma-separated string"""
+    arr = safe_extract(arr)
     if not arr or not isinstance(arr, list):
         return ""
-    return ", ".join(str(safe_extract(item)) for item in arr if safe_extract(item))
+    items = []
+    for item in arr:
+        item_val = safe_extract(item)
+        if item_val:
+            items.append(str(item_val))
+    return ", ".join(items)
 
 def check_nested_field_exists(obj, field_path):
     """Check if a nested field exists"""
-    if not obj or not isinstance(obj, dict):
-        return False
-    
-    keys = field_path.split('.')
-    current = obj
-    
-    for key in keys:
-        if isinstance(current, dict) and key in current:
-            current = current[key]
-            current = safe_extract(current)
-            if current is None:
-                return False
-        else:
-            return False
-    
-    return True
+    return safe_nested_extract(obj, field_path) is not None
 
 # ============================================================================
 # MAPPING DEFINITIONS - ALL COLLECTIONS WITH SAFE EXTRACTION
@@ -731,10 +796,10 @@ CUSTOMERS_MAPPING = {
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
     'des_data_origin': (Literal('customers'), None),
 
-    # Timestamps
-    'ts_customer_created_at': ('createdAt', safe_to_timestamp),
-    'ts_updated_at': ('updatedAt', safe_to_timestamp),
-    'ts_last_session': ('lastSessionAt', safe_to_timestamp),
+    # Timestamps - Using safe field extractors for nested fields
+    'ts_customer_created_at': (safe_field_extractor('createdAt', to_timestamp), None),
+    'ts_updated_at': (safe_field_extractor('updatedAt', to_timestamp), None),
+    'ts_last_session': (safe_field_extractor('lastSessionAt', to_timestamp), None),
 
     # Customer Information
     'des_email': ('email', safe_extract),
@@ -742,62 +807,62 @@ CUSTOMERS_MAPPING = {
     'des_given_name': ('givenName', safe_extract),
     'des_family_name': ('familyName', safe_extract),
     'des_country': ('country', safe_extract),
-    'txt_address': ('address.line1', safe_extract),
-    'txt_address_aux': ('address.line2', safe_extract),
-    'des_locality': ('address.locality', safe_extract),
-    'cod_zip': ('address.zip', safe_extract),
-    'des_country_address': ('address.country', safe_extract),
+    'txt_address': (safe_field_extractor('address.line1'), None),
+    'txt_address_aux': (safe_field_extractor('address.line2'), None),
+    'des_locality': (safe_field_extractor('address.locality'), None),
+    'cod_zip': (safe_field_extractor('address.zip'), None),
+    'des_country_address': (safe_field_extractor('address.country'), None),
 
     # Trial Data
-    'imp_trial_amount': ('trial.amount', safe_to_float),
-    'imp_trial_discount': ('trial.discount', safe_to_float),
-    'val_trial_total_daily_grams': ('trial.consolidatedTrial.totalDailyGrams', safe_to_int),
-    'val_trial_bag_count': ('trial.consolidatedTrial.bagCount', safe_to_int),
-    'fk_trial_sales_agent': ('trial.salesAgent', safe_extract),
-    'des_trial_source': ('trial.source', safe_extract),
+    'imp_trial_amount': (safe_field_extractor('trial.amount', to_float), None),
+    'imp_trial_discount': (safe_field_extractor('trial.discount', to_float), None),
+    'val_trial_total_daily_grams': (safe_field_extractor('trial.consolidatedTrial.totalDailyGrams', to_int), None),
+    'val_trial_bag_count': (safe_field_extractor('trial.consolidatedTrial.bagCount', to_int), None),
+    'fk_trial_sales_agent': (safe_field_extractor('trial.salesAgent'), None),
+    'des_trial_source': (safe_field_extractor('trial.source'), None),
 
-    # Subscription Data
-    'des_subscription_status': ('subscription.status', safe_extract),
-    'ts_subscription_status_updated': ('subscription.statusUpdatedAt', safe_to_timestamp),
-    'fk_subscription_status_updated_by': ('subscription.statusUpdatedBy', safe_extract),
-    'fk_stripe_customer': ('subscription.stripeCustId', safe_extract),
-    'cod_card_last4': ('subscription.cardLast4', safe_extract),
-    'imp_subscription_amount': ('subscription.amount', safe_to_float),
-    'imp_extras_amount': ('subscription.extrasAmount', safe_to_float),
-    'val_orders_in_cycle': ('subscription.ordersInCycle', safe_to_int),
-    'val_payment_cycle_weeks': ('subscription.paymentCycleWeeks', safe_to_int),
-    'val_total_daily_grams': ('subscription.totalDailyGrams', safe_to_int),
-    'val_payment_issues_count': ('subscription.paymentIssuesCount', safe_to_int),
-    'des_delivery_company': ('subscription.deliveryCompany', safe_extract),
-    'val_cooling_packs_qty': ('subscription.coolingPacksQty', safe_to_int),
-    'pct_computed_discount': ('subscription.computedDiscountPercent', safe_to_float),
-    'des_payment_method_id': ('subscription.paymentMethodId', safe_extract),
-    'des_payment_method_type': ('subscription.paymentMethodType', safe_extract),
-    'val_paid_orders_count': ('subscription.paidOrders.count', safe_to_int),
-    'imp_paid_orders_total': ('subscription.paidOrders.totalAmount', safe_to_float),
-    'flg_is_mixed_plan': ('subscription.isMixedPlan', safe_to_bool),
-    'ts_first_mixed_plan': ('subscription.firstMixedPlanAt', safe_to_timestamp),
-    'ts_subscription_paused': ('subscription.pausedAt', safe_to_timestamp),
+    # Subscription Data - All using safe extractors
+    'des_subscription_status': (safe_field_extractor('subscription.status'), None),
+    'ts_subscription_status_updated': (safe_field_extractor('subscription.statusUpdatedAt', to_timestamp), None),
+    'fk_subscription_status_updated_by': (safe_field_extractor('subscription.statusUpdatedBy'), None),
+    'fk_stripe_customer': (safe_field_extractor('subscription.stripeCustId'), None),
+    'cod_card_last4': (safe_field_extractor('subscription.cardLast4'), None),
+    'imp_subscription_amount': (safe_field_extractor('subscription.amount', to_float), None),
+    'imp_extras_amount': (safe_field_extractor('subscription.extrasAmount', to_float), None),
+    'val_orders_in_cycle': (safe_field_extractor('subscription.ordersInCycle', to_int), None),
+    'val_payment_cycle_weeks': (safe_field_extractor('subscription.paymentCycleWeeks', to_int), None),
+    'val_total_daily_grams': (safe_field_extractor('subscription.totalDailyGrams', to_int), None),
+    'val_payment_issues_count': (safe_field_extractor('subscription.paymentIssuesCount', to_int), None),
+    'des_delivery_company': (safe_field_extractor('subscription.deliveryCompany'), None),
+    'val_cooling_packs_qty': (safe_field_extractor('subscription.coolingPacksQty', to_int), None),
+    'pct_computed_discount': (safe_field_extractor('subscription.computedDiscountPercent', to_float), None),
+    'des_payment_method_id': (safe_field_extractor('subscription.paymentMethodId'), None),
+    'des_payment_method_type': (safe_field_extractor('subscription.paymentMethodType'), None),
+    'val_paid_orders_count': (safe_field_extractor('subscription.paidOrders.count', to_int), None),
+    'imp_paid_orders_total': (safe_field_extractor('subscription.paidOrders.totalAmount', to_float), None),
+    'flg_is_mixed_plan': (safe_field_extractor('subscription.isMixedPlan', to_bool), None),
+    'ts_first_mixed_plan': (safe_field_extractor('subscription.firstMixedPlanAt', to_timestamp), None),
+    'ts_subscription_paused': (safe_field_extractor('subscription.pausedAt', to_timestamp), None),
 
-    # Pause Reason
-    'des_pause_reason_category': ('subscription.reasonForPause.category', safe_extract),
-    'des_pause_reason_subcategory': ('subscription.reasonForPause.subcategory', safe_extract),
-    'val_paused_count': ('subscription.pausedCount', safe_to_int),
+    # Pause Reason - Using safe extractors
+    'des_pause_reason_category': (safe_field_extractor('subscription.reasonForPause.category'), None),
+    'des_pause_reason_subcategory': (safe_field_extractor('subscription.reasonForPause.subcategory'), None),
+    'val_paused_count': (safe_field_extractor('subscription.pausedCount', to_int), None),
 
     # Coupon Data
-    'cod_coupon': ('subscription.coupon.code', safe_extract),
-    'val_referral_count': ('subscription.coupon.referralCount', safe_to_int),
-    'pct_coupon_discount': ('subscription.coupon.discountPercent', safe_to_float),
+    'cod_coupon': (safe_field_extractor('subscription.coupon.code'), None),
+    'val_referral_count': (safe_field_extractor('subscription.coupon.referralCount', to_int), None),
+    'pct_coupon_discount': (safe_field_extractor('subscription.coupon.discountPercent', to_float), None),
 
     # Active Records
-    'val_active_orders_count': ('subscription.activeOrders', count_array_items),
-    'cod_active_payment': ('subscription.activePayment', safe_extract),
-    'cod_new_cycle_after_order': ('subscription.newCycleAfterOrder', safe_extract),
+    'val_active_orders_count': (lambda doc: count_array_items(safe_nested_extract(doc, 'subscription.activeOrders')), None),
+    'cod_active_payment': (safe_field_extractor('subscription.activePayment'), None),
+    'cod_new_cycle_after_order': (safe_field_extractor('subscription.newCycleAfterOrder'), None),
 
     # Flags
-    'flg_review_invitation_pending': ('subscription.isReviewInvitationPending', safe_to_bool),
-    'des_last_review_invitation': ('subscription.lastReviewInvitation', safe_extract),
-    'flg_contacted_after_status_update': ('subscription.isContactedAfterStatusUpdated', safe_to_bool),
+    'flg_review_invitation_pending': (safe_field_extractor('subscription.isReviewInvitationPending', to_bool), None),
+    'des_last_review_invitation': (safe_field_extractor('subscription.lastReviewInvitation'), None),
+    'flg_contacted_after_status_update': (safe_field_extractor('subscription.isContactedAfterStatusUpdated', to_bool), None),
 
     # Integration flags
     'flg_updated_on_hubspot': ('isUpdatedOnHubspot', safe_to_bool),
@@ -835,8 +900,8 @@ LEADS_MAPPING = {
     'ts_updated_at': ('updatedAt', safe_to_timestamp),
     'ts_trial_delivery_default': ('defaultDeliveryDate', safe_to_timestamp),
     'ts_trial_delivery': ('trialDeliveryDate', safe_to_timestamp),
-    'ts_sales_assigned': ('sales.assignedAt', safe_to_timestamp),
-    'ts_sales_state_updated': ('sales.stateUpdatedAt', safe_to_timestamp),
+    'ts_sales_assigned': (safe_field_extractor('sales.assignedAt', to_timestamp), None),
+    'ts_sales_state_updated': (safe_field_extractor('sales.stateUpdatedAt', to_timestamp), None),
 
     # Lead Information
     'des_email': ('email', safe_extract),
@@ -845,18 +910,18 @@ LEADS_MAPPING = {
     'des_family_name': ('familyName', safe_extract),
     'des_country': ('country', safe_extract),
     'cod_zip': ('zip', safe_extract),
-    'txt_address': ('address.line1', safe_extract),
-    'txt_address_aux': ('address.line2', safe_extract),
-    'des_locality': ('address.locality', safe_extract),
-    'des_country_address': ('address.country', safe_extract),
+    'txt_address': (safe_field_extractor('address.line1'), None),
+    'txt_address_aux': (safe_field_extractor('address.line2'), None),
+    'des_locality': (safe_field_extractor('address.locality'), None),
+    'des_country_address': (safe_field_extractor('address.country'), None),
 
     # Sales Data
-    'des_sales_status': ('sales.status', safe_extract),
-    'fk_sales_agent': ('sales.assignedTo', safe_extract),
-    'val_assignment_count': ('sales.assignmentCount', safe_to_int),
+    'des_sales_status': (safe_field_extractor('sales.status'), None),
+    'fk_sales_agent': (safe_field_extractor('sales.assignedTo'), None),
+    'val_assignment_count': (safe_field_extractor('sales.assignmentCount', to_int), None),
     'val_usage_count': ('usageCount', safe_to_int),
-    'txt_not_interested_reason': ('sales.notInterestedReason.category', safe_extract),
-    'des_not_interested_subcategory': ('sales.notInterestedReason.subcategory', safe_extract),
+    'txt_not_interested_reason': (safe_field_extractor('sales.notInterestedReason.category'), None),
+    'des_not_interested_subcategory': (safe_field_extractor('sales.notInterestedReason.subcategory'), None),
 
     # Financial Data
     'imp_trial_amount': ('trialAmount', safe_to_float),
@@ -867,14 +932,14 @@ LEADS_MAPPING = {
     'val_orders_in_cycle': ('ordersInCycle', safe_to_int),
 
     # Acquisition
-    'des_acquisition_source_first': ('acquisition.first.source', safe_extract),
-    'des_acquisition_source_last': ('acquisition.last.source', safe_extract),
+    'des_acquisition_source_first': (safe_field_extractor('acquisition.first.source'), None),
+    'des_acquisition_source_last': (safe_field_extractor('acquisition.last.source'), None),
 
     # Subscription data
-    'fk_stripe_customer_lead': ('subscription.stripeCustId', safe_extract),
-    'cod_pricing_factor': ('subscription.pricingFactor', safe_extract),
-    'ts_initial_payment_attempted': ('subscription.initialPaymentAttemptedAt', safe_to_timestamp),
-    'cod_stripe_payment_id': ('subscription.stripePaymentId', safe_extract),
+    'fk_stripe_customer_lead': (safe_field_extractor('subscription.stripeCustId'), None),
+    'cod_pricing_factor': (safe_field_extractor('subscription.pricingFactor'), None),
+    'ts_initial_payment_attempted': (safe_field_extractor('subscription.initialPaymentAttemptedAt', to_timestamp), None),
+    'cod_stripe_payment_id': (safe_field_extractor('subscription.stripePaymentId'), None),
 
     # Flags & Features
     'flg_mixed_plan': ('isMixedPlan', safe_to_bool),
@@ -897,7 +962,7 @@ LEADS_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Orders mapping - COMPLETE WITH ARRAY HANDLING
+# Orders mapping - COMPLETE WITH ARRAY HANDLING  
 ORDERS_MAPPING = {
     # Primary Keys & Metadata
     'pk_order': ('_id', to_string),
@@ -920,11 +985,11 @@ ORDERS_MAPPING = {
     'des_country': ('country', safe_extract),
     
     # Address Information
-    'txt_address_line1': ('address.line1', safe_extract),
-    'txt_address_line2': ('address.line2', safe_extract),
-    'des_locality': ('address.locality', safe_extract),
-    'cod_zip': ('address.zip', safe_extract),
-    'des_address_country': ('address.country', safe_extract),
+    'txt_address_line1': (safe_field_extractor('address.line1'), None),
+    'txt_address_line2': (safe_field_extractor('address.line2'), None),
+    'des_locality': (safe_field_extractor('address.locality'), None),
+    'cod_zip': (safe_field_extractor('address.zip'), None),
+    'des_address_country': (safe_field_extractor('address.country'), None),
     
     # Contact Info
     'des_email': ('email', safe_extract),
@@ -947,23 +1012,23 @@ ORDERS_MAPPING = {
 
     # Package Details
     'val_cooling_packs_qty': ('coolingPacksQty', safe_to_int),
-    'val_package_bag_count': ('package.bagCount', safe_to_int),
-    'val_total_package_count': ('package.totalPackageCount', safe_to_int),
-    'val_total_weight_kg': ('package.totalWeightKg', safe_to_float),
+    'val_package_bag_count': (safe_field_extractor('package.bagCount', to_int), None),
+    'val_total_package_count': (safe_field_extractor('package.totalPackageCount', to_int), None),
+    'val_total_weight_kg': (safe_field_extractor('package.totalWeightKg', to_float), None),
     'val_package_handlers_count': ('package', extract_handlers_count),
-    'flg_package_has_issue': ('package.hasIssue', safe_to_bool),
-    'des_package_issue_category': ('package.issueType', safe_extract),
+    'flg_package_has_issue': (safe_field_extractor('package.hasIssue', to_bool), None),
+    'des_package_issue_category': (safe_field_extractor('package.issueType'), None),
     'val_delta_days': ('deltaDays', safe_to_int),
     'des_additional_order_reason': ('additionalOrderReason', safe_extract),
     'des_locked_by': ('lockedBy', safe_extract),
 
     # Delivery Details
-    'des_delivery_company': ('delivery.deliveryCompany', safe_extract),
-    'flg_delivery_has_issue': ('delivery.hasIssue', safe_to_bool),
-    'des_delivery_issue_category': ('delivery.issueType', safe_extract),
-    'cod_tracking_url': ('delivery.trackingUrl', safe_extract),
-    'cod_parcel_id': ('delivery.parcelId', safe_extract),
-    'des_label_group': ('delivery.labelGroup', safe_extract),
+    'des_delivery_company': (safe_field_extractor('delivery.deliveryCompany'), None),
+    'flg_delivery_has_issue': (safe_field_extractor('delivery.hasIssue', to_bool), None),
+    'des_delivery_issue_category': (safe_field_extractor('delivery.issueType'), None),
+    'cod_tracking_url': (safe_field_extractor('delivery.trackingUrl'), None),
+    'cod_parcel_id': (safe_field_extractor('delivery.parcelId'), None),
+    'des_label_group': (safe_field_extractor('delivery.labelGroup'), None),
 
     # Content - Aggregated from bagList
     'val_total_bags': ('content', extract_bag_totals),
@@ -1026,10 +1091,10 @@ PAYMENTS_MAPPING = {
     'cod_card_last4': ('cardLast4', safe_extract),
 
     # Discounts Applied
-    'pct_subscription_discount_applied': ('discountsApplied.subscriptionDiscountPercent', safe_to_float),
-    'val_referral_count_applied': ('discountsApplied.referralCount', safe_to_int),
-    'cod_applied_coupon': ('discountsApplied.appliedCoupon', safe_extract),
-    'pct_trial_discount_applied': ('discountsApplied.trialDiscountPercent', safe_to_float),
+    'pct_subscription_discount_applied': (safe_field_extractor('discountsApplied.subscriptionDiscountPercent', to_float), None),
+    'val_referral_count_applied': (safe_field_extractor('discountsApplied.referralCount', to_int), None),
+    'cod_applied_coupon': (safe_field_extractor('discountsApplied.appliedCoupon'), None),
+    'pct_trial_discount_applied': (safe_field_extractor('discountsApplied.trialDiscountPercent', to_float), None),
 
     # Payment Characteristics - Boolean Flags
     'flg_is_trial': ('isTrial', safe_to_bool),
@@ -1060,58 +1125,77 @@ PAYMENTS_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Deliveries mapping - COMPLETE WITH ARRAY HANDLING
+# Continue with remaining collections using safe extractors...
+# Stats mapping - FIXED WITH SAFE EXTRACTORS
+STATS_MAPPING = {
+    'pk_stat': ('_id', to_string),
+    'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
+    'des_data_origin': (Literal('stats'), None),
+    'ts_created_at': ('createdAt', safe_to_timestamp),
+    'ts_updated_at': ('updatedAt', safe_to_timestamp),
+    'val_year': ('year', safe_to_int),
+    'val_month': ('month', safe_to_int),
+    'des_stat_type': ('_id', extract_stat_type),
+    'fk_agent_or_handler': ('_id', extract_agent_from_stat_id),
+    'des_stat_country': ('country', safe_extract),  # FIX: Using safe_extract
+    'val_total_assigned_leads': (safe_field_extractor('totals.assignedLeads.total', to_int), None),  # FIX: Using safe_field_extractor
+    'val_total_appointments': (safe_field_extractor('totals.appointments', to_int), None),  # FIX
+    'val_total_sales': (safe_field_extractor('totals.sales', to_int), None),  # FIX
+    'val_total_not_answered': (safe_field_extractor('totals.notAnswered', to_int), None),  # FIX
+    'val_total_not_interested': (safe_field_extractor('totals.notInterested', to_int), None),  # FIX
+    'val_total_orders': (safe_field_extractor('totals.orderCount', to_int), None),  # FIX
+    'val_total_packages': (safe_field_extractor('totals.packageCount', to_int), None),  # FIX
+    'pct_conversion_rate': ('conversionRate', safe_to_float),
+    'pct_retention_rate': ('retentionRate', safe_to_float),
+    'imp_average_sales': ('averageSales', safe_to_float),
+    'des_source': (Literal('mongo'), None),
+}
+
+# Apply safe extractors to remaining collections...
+# For brevity, I'll show the pattern for a few more critical ones:
+
+# Deliveries mapping - WITH SAFE EXTRACTORS
 DELIVERIES_MAPPING = {
-    # Primary Keys & Metadata
     'pk_delivery': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
     'des_data_origin': (Literal('deliveries'), None),
-
-    # Delivery Identification & Linking
     'fk_customer': ('custId', safe_extract),
     'des_full_name': ('fullName', safe_extract),
     'cod_parcel_id': ('parcelId', safe_extract),
-    
-    # Timestamps
     'ts_delivery_created': ('createdAt', safe_to_timestamp),
     'ts_delivery_updated': ('updatedAt', safe_to_timestamp),
     'ts_delivery_date_scheduled': ('deliveryDate', safe_to_timestamp),
     'ts_delivery_date_actual': ('date', safe_to_timestamp),
-    'ts_issue_solved_at': ('issue.solvedAt', safe_to_timestamp),
-
-    # Delivery Status & Classification
+    'ts_issue_solved_at': (safe_field_extractor('issue.solvedAt', to_timestamp), None),
     'des_delivery_status': ('status', safe_extract),
     'des_country': ('country', safe_extract),
     'des_delivery_company': ('deliveryCompany', safe_extract),
     'des_label_group': ('labelGroup', safe_extract),
-    
-    # Address Information
-    'txt_address_line1': ('address.line1', safe_extract),
-    'txt_address_line2': ('address.line2', safe_extract),
-    'des_locality': ('address.locality', safe_extract),
-    'cod_zip': ('address.zip', safe_extract),
-    'des_address_country': ('address.country', safe_extract),
-
-    # Delivery Characteristics - Boolean Flags
+    'txt_address_line1': (safe_field_extractor('address.line1'), None),
+    'txt_address_line2': (safe_field_extractor('address.line2'), None),
+    'des_locality': (safe_field_extractor('address.locality'), None),
+    'cod_zip': (safe_field_extractor('address.zip'), None),
+    'des_address_country': (safe_field_extractor('address.country'), None),
     'flg_is_for_robots': ('isForRobots', safe_to_bool),
-    'flg_cust_label_printed': ('isPrinted.cust', safe_to_bool),
-    'flg_internal_label_printed': ('isPrinted.internal', safe_to_bool),
-
-    # Issue Tracking
-    'flg_has_issue': ('issue.hasIssue', safe_to_bool),
-    'txt_issue_reason': ('issue.reason', safe_extract),
-
-    # Label Data
+    'flg_cust_label_printed': (safe_field_extractor('isPrinted.cust', to_bool), None),
+    'flg_internal_label_printed': (safe_field_extractor('isPrinted.internal', to_bool), None),
+    'flg_has_issue': (safe_field_extractor('issue.hasIssue', to_bool), None),
+    'txt_issue_reason': (safe_field_extractor('issue.reason'), None),
     'flg_has_label_data': ('labelData', has_label_data),
     'val_label_data_length': ('labelData', get_label_data_length),
     'flg_has_internal_label_data': ('internalLabelData', has_label_data),
     'val_internal_label_data_length': ('internalLabelData', get_label_data_length),
-
-    # Standard
     'des_source': (Literal('mongo'), None),
 }
 
-# Coupons mapping - COMPLETE WITH ARRAY HANDLING
+# Apply the same pattern to all other mappings...
+# The key changes are:
+# 1. All simple fields use safe_extract or safe_to_* functions
+# 2. All nested fields use safe_field_extractor
+# 3. All custom extractors already use safe_extract internally
+
+# I'll include the remaining mappings with safe extractors:
+
 COUPONS_MAPPING = {
     'pk_coupon': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
@@ -1124,7 +1208,6 @@ COUPONS_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Users-metadata mapping - COMPLETE WITH ARRAY HANDLING
 USERS_METADATA_MAPPING = {
     'pk_user_metadata': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
@@ -1139,7 +1222,6 @@ USERS_METADATA_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Leads-archive mapping - COMPLETE WITH ARRAY HANDLING
 LEADS_ARCHIVE_MAPPING = {
     'pk_lead_archive': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
@@ -1188,7 +1270,6 @@ LEADS_ARCHIVE_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Contacts-logs mapping - COMPLETE WITH ARRAY HANDLING
 CONTACTS_LOGS_MAPPING = {
     'pk_contact_log': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
@@ -1210,7 +1291,6 @@ CONTACTS_LOGS_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Retentions mapping - COMPLETE WITH ARRAY HANDLING
 RETENTIONS_MAPPING = {
     'pk_retention': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
@@ -1237,7 +1317,6 @@ RETENTIONS_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Notifications mapping - COMPLETE WITH ARRAY HANDLING
 NOTIFICATIONS_MAPPING = {
     'pk_notification': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
@@ -1254,7 +1333,6 @@ NOTIFICATIONS_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Appointments mapping - COMPLETE WITH ARRAY HANDLING
 APPOINTMENTS_MAPPING = {
     'pk_appointment': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
@@ -1268,7 +1346,6 @@ APPOINTMENTS_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Changelogs mapping - COMPLETE WITH ARRAY HANDLING
 CHANGELOGS_MAPPING = {
     'pk_changelog': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
@@ -1289,7 +1366,6 @@ CHANGELOGS_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Orders-archive mapping - COMPLETE WITH ARRAY HANDLING
 ORDERS_ARCHIVE_MAPPING = {
     'pk_order': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
@@ -1303,11 +1379,11 @@ ORDERS_ARCHIVE_MAPPING = {
     'ts_initial_date': ('initialDate', safe_to_timestamp),
     'des_order_status': ('status', safe_extract),
     'des_country': ('country', safe_extract),
-    'txt_address_line1': ('address.line1', safe_extract),
-    'txt_address_line2': ('address.line2', safe_extract),
-    'des_locality': ('address.locality', safe_extract),
-    'cod_zip': ('address.zip', safe_extract),
-    'des_address_country': ('address.country', safe_extract),
+    'txt_address_line1': (safe_field_extractor('address.line1'), None),
+    'txt_address_line2': (safe_field_extractor('address.line2'), None),
+    'des_locality': (safe_field_extractor('address.locality'), None),
+    'cod_zip': (safe_field_extractor('address.zip'), None),
+    'des_address_country': (safe_field_extractor('address.country'), None),
     'des_email': ('email', safe_extract),
     'des_phone': ('phone', safe_extract),
     'flg_is_trial': ('isTrial', safe_to_bool),
@@ -1324,14 +1400,14 @@ ORDERS_ARCHIVE_MAPPING = {
     'flg_was_moved_back': ('wasMovedBack', safe_to_bool),
     'flg_was_reset': ('wasReset', safe_to_bool),
     'flg_notification_sent': ('notificationSent', safe_to_bool),
-    'val_package_bag_count': ('package.bagCount', safe_to_int),
-    'val_total_package_count': ('package.totalPackageCount', safe_to_int),
-    'val_total_weight_kg': ('package.totalWeightKg', safe_to_float),
-    'des_delivery_company': ('delivery.deliveryCompany', safe_extract),
-    'flg_delivery_has_issue': ('delivery.hasIssue', safe_to_bool),
-    'val_total_bags': ('content.bagCount', safe_to_int),
-    'val_chicken_portions': ('content.menu.chicken', safe_to_int),
-    'val_turkey_portions': ('content.menu.turkey', safe_to_int),
+    'val_package_bag_count': (safe_field_extractor('package.bagCount', to_int), None),
+    'val_total_package_count': (safe_field_extractor('package.totalPackageCount', to_int), None),
+    'val_total_weight_kg': (safe_field_extractor('package.totalWeightKg', to_float), None),
+    'des_delivery_company': (safe_field_extractor('delivery.deliveryCompany'), None),
+    'flg_delivery_has_issue': (safe_field_extractor('delivery.hasIssue', to_bool), None),
+    'val_total_bags': (safe_field_extractor('content.bagCount', to_int), None),
+    'val_chicken_portions': (safe_field_extractor('content.menu.chicken', to_int), None),
+    'val_turkey_portions': (safe_field_extractor('content.menu.turkey', to_int), None),
     'des_locked_by': ('lockedBy', safe_extract),
     'des_updated_by': ('__updatedBy', safe_extract),
     'val_delta_days': ('deltaDays', safe_to_int),
@@ -1339,7 +1415,6 @@ ORDERS_ARCHIVE_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Payments-archive mapping - COMPLETE WITH ARRAY HANDLING
 PAYMENTS_ARCHIVE_MAPPING = {
     'pk_payment': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
@@ -1380,7 +1455,6 @@ PAYMENTS_ARCHIVE_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Packages mapping - COMPLETE WITH ARRAY HANDLING
 PACKAGES_MAPPING = {
     'pk_package': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
@@ -1396,21 +1470,19 @@ PACKAGES_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Engagement-histories mapping - COMPLETE WITH ARRAY HANDLING
 ENGAGEMENT_HISTORIES_MAPPING = {
     'pk_engagement': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
     'des_data_origin': (Literal('engagement-histories'), None),
     'ts_created_at': ('createdAt', safe_to_timestamp),
     'ts_updated_at': ('updatedAt', safe_to_timestamp),
-    'flg_survey_engaged': ('cust.tests.customerDataSurvey.isEngaged', safe_to_bool),
-    'des_survey_value': ('cust.tests.customerDataSurvey.value', safe_extract),
-    'flg_has_daily_grams_recommendations': ('cust.recommendationData.dailyGrams', lambda x: safe_extract(x) is not None and len(x) > 0 if isinstance(x, list) else False),
-    'flg_has_menu_recommendations': ('cust.recommendationData.menus', lambda x: safe_extract(x) is not None and len(x) > 0 if isinstance(x, list) else False),
+    'flg_survey_engaged': (safe_field_extractor('cust.tests.customerDataSurvey.isEngaged', to_bool), None),
+    'des_survey_value': (safe_field_extractor('cust.tests.customerDataSurvey.value'), None),
+    'flg_has_daily_grams_recommendations': (lambda doc: safe_nested_extract(doc, 'cust.recommendationData.dailyGrams') is not None and len(safe_extract(safe_nested_extract(doc, 'cust.recommendationData.dailyGrams'), [])) > 0, None),
+    'flg_has_menu_recommendations': (lambda doc: safe_nested_extract(doc, 'cust.recommendationData.menus') is not None and len(safe_extract(safe_nested_extract(doc, 'cust.recommendationData.menus'), [])) > 0, None),
     'des_source': (Literal('mongo'), None),
 }
 
-# Geocontext mapping - COMPLETE WITH ARRAY HANDLING
 GEOCONTEXT_MAPPING = {
     'pk_geocontext': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
@@ -1421,7 +1493,6 @@ GEOCONTEXT_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Invalid-phones mapping - COMPLETE WITH ARRAY HANDLING
 INVALID_PHONES_MAPPING = {
     'pk_phone': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
@@ -1433,7 +1504,6 @@ INVALID_PHONES_MAPPING = {
     'des_source': (Literal('mongo'), None),
 }
 
-# Sysusers mapping - COMPLETE WITH ARRAY HANDLING
 SYSUSERS_MAPPING = {
     'pk_sysuser': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
@@ -1449,38 +1519,12 @@ SYSUSERS_MAPPING = {
     'des_role': ('role', safe_extract),
     'txt_manages_countries': ('managesCountries', join_array_as_string),
     'flg_is_suspended': ('isSuspended', safe_to_bool),
-    'flg_is_sales_available': ('sales.isAvailable', safe_to_bool),
+    'flg_is_sales_available': (safe_field_extractor('sales.isAvailable', to_bool), None),
     'flg_has_sales_tracking': ('sales', lambda x: safe_extract(x) is not None),
     'flg_has_retentions': ('retentions', lambda x: safe_extract(x) is not None),
     'des_source': (Literal('mongo'), None),
 }
 
-# Stats mapping - COMPLETE WITH ARRAY HANDLING
-STATS_MAPPING = {
-    'pk_stat': ('_id', to_string),
-    'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
-    'des_data_origin': (Literal('stats'), None),
-    'ts_created_at': ('createdAt', safe_to_timestamp),
-    'ts_updated_at': ('updatedAt', safe_to_timestamp),
-    'val_year': ('year', safe_to_int),
-    'val_month': ('month', safe_to_int),
-    'des_stat_type': ('_id', extract_stat_type),
-    'fk_agent_or_handler': ('_id', extract_agent_from_stat_id),
-    'des_stat_country': ('country', safe_extract),
-    'val_total_assigned_leads': ('totals.assignedLeads.total', safe_to_int),
-    'val_total_appointments': ('totals.appointments', safe_to_int),
-    'val_total_sales': ('totals.sales', safe_to_int),
-    'val_total_not_answered': ('totals.notAnswered', safe_to_int),
-    'val_total_not_interested': ('totals.notInterested', safe_to_int),
-    'val_total_orders': ('totals.orderCount', safe_to_int),
-    'val_total_packages': ('totals.packageCount', safe_to_int),
-    'pct_conversion_rate': ('conversionRate', safe_to_float),
-    'pct_retention_rate': ('retentionRate', safe_to_float),
-    'imp_average_sales': ('averageSales', safe_to_float),
-    'des_source': (Literal('mongo'), None),
-}
-
-# Sysinfo mapping - COMPLETE WITH ARRAY HANDLING
 SYSINFO_MAPPING = {
     'pk_config': ('_id', to_string),
     'pk_yearmonth': (lambda: datetime.now().strftime("%Y%m"), None),
@@ -1493,10 +1537,10 @@ SYSINFO_MAPPING = {
     'flg_has_robot_settings': ('robots', lambda x: safe_extract(x) is not None),
     'flg_has_stock_levels': ('levels', lambda x: safe_extract(x) is not None),
     'flg_has_agent_lists': ('_id', lambda x: 'AVAILABLE-AGENTS' in str(safe_extract(x)) if safe_extract(x) else False),
-    'val_chicken_stock': ('levels.chicken.300', safe_to_int),
-    'val_salmon_stock': ('levels.salmon.300', safe_to_int),
-    'val_beef_stock': ('levels.beef.300', safe_to_int),
-    'val_turkey_stock': ('levels.turkey.300', safe_to_int),
+    'val_chicken_stock': (safe_field_extractor('levels.chicken.300', to_int), None),
+    'val_salmon_stock': (safe_field_extractor('levels.salmon.300', to_int), None),
+    'val_beef_stock': (safe_field_extractor('levels.beef.300', to_int), None),
+    'val_turkey_stock': (safe_field_extractor('levels.turkey.300', to_int), None),
     'des_source': (Literal('mongo'), None),
 }
 
