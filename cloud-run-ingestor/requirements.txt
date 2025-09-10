@@ -1,5 +1,29 @@
-flask
-pymongo
-google-cloud-pubsub
-google-cloud-secret-manager
-gunicorn
+# Core async framework
+flask==3.0.0
+gunicorn==21.2.0
+
+# Async MongoDB driver
+motor==3.3.2
+pymongo==4.6.0  # Required by motor
+
+# Google Cloud services
+google-cloud-pubsub==2.18.4
+google-cloud-secret-manager==2.17.0
+google-cloud-firestore==2.13.1
+google-cloud-monitoring==2.16.0
+
+# Async HTTP client
+aiohttp==3.9.1
+
+# BSON handling
+bson==0.5.10
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2023.3.post1
+
+# For monitoring/observability
+prometheus-client==0.19.0  # Optional for Prometheus metrics
+
+# JSON handling with BSON types
+simplejson==3.19.2

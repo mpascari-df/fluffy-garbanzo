@@ -1,0 +1,80 @@
+# Git
+.git
+.gitignore
+README.md
+*.md
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+*-venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Project specific
+scripts/
+tests/
+docs/
+*.log
+*.pid
+*.seed
+*.pid.lock
+.env
+.env.*
+config_*.sh
+terraform/
+*.tfstate
+*.tfvars
+
+# Docker
+Dockerfile.*
+docker-compose*.yml
+.dockerignore
+
+# Testing
+test_*.py
+*_test.py
+coverage.xml
+*.cover
+.hypothesis/
+
+# Monitoring
+dashboards/
+alerts/
+grafana/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
+*.old
+
+# Documentation
+*.pdf
+*.docx
+LICENSE
+CHANGELOG.md
+CONTRIBUTING.md
