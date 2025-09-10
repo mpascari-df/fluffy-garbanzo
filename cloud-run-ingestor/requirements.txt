@@ -15,9 +15,6 @@ google-cloud-monitoring==2.16.0
 # Async HTTP client
 aiohttp==3.9.1
 
-# BSON handling
-bson==0.5.10
-
 # Utilities
 python-dateutil==2.8.2
 pytz==2023.3.post1

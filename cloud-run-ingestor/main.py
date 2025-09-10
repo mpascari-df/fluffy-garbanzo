@@ -35,6 +35,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+SERVICE_START_TIME = time.time()
+
 # Flask app for health checks and manual triggers
 app = Flask(__name__)
 
@@ -534,6 +536,14 @@ service: Optional[ChangeStreamIngestionService] = None
 @app.route('/health')
 def health_check():
     """Health check endpoint."""
+    # Allow 10 seconds for service to initialize
+    if time.time() - SERVICE_START_TIME < 10:
+        return jsonify({
+            'status': 'starting',
+            'service': 'mongo-ingestor-async',
+            'message': 'Service initializing'
+        }), 200
+    
     if service and service.consumer.is_running:
         return jsonify({
             'status': 'healthy',
