@@ -870,8 +870,8 @@ async def main():
         service = ChangeStreamIngestionService()
         
         # Setup signal handlers
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGINT, signal_handler)
+        #signal.signal(signal.SIGTERM, signal_handler)
+        #signal.signal(signal.SIGINT, signal_handler)
         
         # Start service
         await service.start()
