@@ -17,6 +17,7 @@ import uuid
 
 import motor.motor_asyncio
 from bson import json_util
+from bson import Timestamp
 from flask import Flask, jsonify, request
 from google.cloud import pubsub_v1
 from google.cloud import firestore
@@ -181,7 +182,7 @@ class AsyncChangeStreamConsumer:
         
         # Determine resume point
         resume_token = await self._get_resume_point()
-        resume_type = "token" if isinstance(resume_token, dict) else "timestamp" if isinstance(resume_token, datetime) else "now"
+        resume_type = "token" if isinstance(resume_token, dict) else "timestamp" if isinstance(resume_token, Timestamp) else "now"
         logger.info(f"📍 Resume strategy: {resume_type}")
         
         pipeline = [
@@ -277,8 +278,11 @@ class AsyncChangeStreamConsumer:
             
             # Tier 3: Start from safe window in the past
             safe_start = datetime.now(timezone.utc) - timedelta(hours=self.config.SAFE_START_HOURS)
-            logger.info(f"📅 Starting from safe window: {safe_start.isoformat()}")
-            return safe_start
+            # Convert datetime to MongoDB Timestamp
+            timestamp_seconds = int(safe_start.timestamp())
+            mongo_timestamp = Timestamp(timestamp_seconds, 1)
+            logger.info(f"📅 Starting from safe window: {safe_start.isoformat()} as Timestamp({timestamp_seconds}, 1)")
+            return mongo_timestamp
             
         except Exception as e:
             logger.error(f"❌ Error determining resume point: {e}")
