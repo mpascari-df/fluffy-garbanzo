@@ -1,0 +1,144 @@
+{
+  "displayName": "MongoDB Pipeline - Operational",
+  "gridLayout": {
+    "widgets": [
+      {
+        "title": "📊 Events Processing Rate",
+        "xyChart": {
+          "dataSets": [{
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/change_stream_events\"",
+                "aggregation": {
+                  "alignmentPeriod": "60s",
+                  "perSeriesAligner": "ALIGN_RATE"
+                }
+              }
+            },
+            "plotType": "LINE",
+            "legendTemplate": "Events Ingested"
+          },
+          {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/pubsub_published\"",
+                "aggregation": {
+                  "alignmentPeriod": "60s",
+                  "perSeriesAligner": "ALIGN_RATE"
+                }
+              }
+            },
+            "plotType": "LINE",
+            "legendTemplate": "Published to Pub/Sub"
+          },
+          {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/gcs_write_success\"",
+                "aggregation": {
+                  "alignmentPeriod": "60s",
+                  "perSeriesAligner": "ALIGN_RATE"
+                }
+              }
+            },
+            "plotType": "LINE",
+            "legendTemplate": "Written to GCS"
+          }]
+        }
+      },
+      {
+        "title": "🚨 Data Loss Events",
+        "scorecard": {
+          "timeSeriesQuery": {
+            "timeSeriesFilter": {
+              "filter": "metric.type=\"logging.googleapis.com/user/data_loss_events\"",
+              "aggregation": {
+                "alignmentPeriod": "3600s",
+                "perSeriesAligner": "ALIGN_DELTA"
+              }
+            }
+          },
+          "thresholds": [
+            {
+              "value": 1.0,
+              "direction": "ABOVE"
+            }
+          ]
+        }
+      },
+      {
+        "title": "✅ Total Events Today",
+        "scorecard": {
+          "timeSeriesQuery": {
+            "timeSeriesFilter": {
+              "filter": "metric.type=\"logging.googleapis.com/user/change_stream_events\"",
+              "aggregation": {
+                "alignmentPeriod": "86400s",
+                "perSeriesAligner": "ALIGN_DELTA"
+              }
+            }
+          }
+        }
+      },
+      {
+        "title": "⚠️ Error Rate",
+        "xyChart": {
+          "dataSets": [{
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/format_errors\"",
+                "aggregation": {
+                  "alignmentPeriod": "60s",
+                  "perSeriesAligner": "ALIGN_RATE"
+                }
+              }
+            },
+            "plotType": "LINE",
+            "legendTemplate": "Format Errors"
+          },
+          {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/unexpected_errors\"",
+                "aggregation": {
+                  "alignmentPeriod": "60s",
+                  "perSeriesAligner": "ALIGN_RATE"
+                }
+              }
+            },
+            "plotType": "LINE",
+            "legendTemplate": "Unexpected Errors"
+          }]
+        }
+      },
+      {
+        "title": "🐌 Slow Operations",
+        "scorecard": {
+          "timeSeriesQuery": {
+            "timeSeriesFilter": {
+              "filter": "metric.type=\"logging.googleapis.com/user/slow_publishes\"",
+              "aggregation": {
+                "alignmentPeriod": "300s",
+                "perSeriesAligner": "ALIGN_RATE"
+              }
+            }
+          }
+        }
+      },
+      {
+        "title": "📬 Messages to Cloud Function",
+        "scorecard": {
+          "timeSeriesQuery": {
+            "timeSeriesFilter": {
+              "filter": "metric.type=\"logging.googleapis.com/user/function_messages_received\"",
+              "aggregation": {
+                "alignmentPeriod": "300s",
+                "perSeriesAligner": "ALIGN_RATE"
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

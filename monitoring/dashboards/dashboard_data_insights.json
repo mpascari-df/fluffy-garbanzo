@@ -1,0 +1,100 @@
+{
+  "displayName": "MongoDB Pipeline - Data Insights",
+  "gridLayout": {
+    "widgets": [
+      {
+        "title": "📚 Events by Collection",
+        "xyChart": {
+          "dataSets": [{
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/events_by_collection\"",
+                "aggregation": {
+                  "alignmentPeriod": "300s",
+                  "perSeriesAligner": "ALIGN_RATE"
+                }
+              }
+            },
+            "plotType": "STACKED_AREA"
+          }]
+        }
+      },
+      {
+        "title": "📈 Hourly Event Volume",
+        "xyChart": {
+          "dataSets": [{
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/change_stream_events\"",
+                "aggregation": {
+                  "alignmentPeriod": "3600s",
+                  "perSeriesAligner": "ALIGN_DELTA"
+                }
+              }
+            },
+            "plotType": "STACKED_BAR"
+          }]
+        }
+      },
+      {
+        "title": "🔄 Pub/Sub Success Rate",
+        "scorecard": {
+          "timeSeriesQuery": {
+            "timeSeriesFilter": {
+              "filter": "metric.type=\"logging.googleapis.com/user/pubsub_published\"",
+              "aggregation": {
+                "alignmentPeriod": "3600s",
+                "perSeriesAligner": "ALIGN_DELTA"
+              }
+            }
+          }
+        }
+      },
+      {
+        "title": "💾 GCS Write Success Rate",
+        "scorecard": {
+          "timeSeriesQuery": {
+            "timeSeriesFilter": {
+              "filter": "metric.type=\"logging.googleapis.com/user/gcs_write_success\"",
+              "aggregation": {
+                "alignmentPeriod": "3600s",
+                "perSeriesAligner": "ALIGN_DELTA"
+              }
+            }
+          }
+        }
+      },
+      {
+        "title": "⚡ High Latency Operations",
+        "xyChart": {
+          "dataSets": [{
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/high_latency_operations\"",
+                "aggregation": {
+                  "alignmentPeriod": "300s",
+                  "perSeriesAligner": "ALIGN_RATE"
+                }
+              }
+            },
+            "plotType": "LINE"
+          }]
+        }
+      },
+      {
+        "title": "📊 System Health Stats",
+        "scorecard": {
+          "timeSeriesQuery": {
+            "timeSeriesFilter": {
+              "filter": "metric.type=\"logging.googleapis.com/user/ingestor_system_stats\"",
+              "aggregation": {
+                "alignmentPeriod": "300s",
+                "perSeriesAligner": "ALIGN_RATE"
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

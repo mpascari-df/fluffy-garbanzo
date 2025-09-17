@@ -1,0 +1,541 @@
+{
+  "displayName": "Business Analyst - Data Profiling & Quality Dashboard",
+  "description": "Data profiling, quality metrics, and business patterns for analysts to understand dataflows and design quality checks",
+  "version": "1.0.0",
+  "metadata": {
+    "created_by": "monitoring-automation",
+    "purpose": "data-quality-profiling",
+    "last_updated": "2024-01-20"
+  },
+  "mosaicLayout": {
+    "columns": 12,
+    "tiles": [
+      {
+        "width": 12,
+        "height": 1,
+        "widget": {
+          "title": "📊 Business Analyst Dashboard - Data Profiling & Quality Insights",
+          "text": {
+            "content": "**Purpose**: Data profiling for quality checks and modeling | **Focus**: Collection patterns, data quality, business trends | **Refresh**: 5 minutes",
+            "format": "MARKDOWN"
+          }
+        }
+      },
+      {
+        "yPos": 1,
+        "width": 6,
+        "height": 4,
+        "widget": {
+          "title": "Active Collections Overview",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/collection_activity\" AND resource.type=\"cloud_run_revision\"",
+                "aggregation": {
+                  "alignmentPeriod": "300s",
+                  "crossSeriesReducer": "REDUCE_COUNT_TRUE",
+                  "groupByFields": ["metric.label.collection_name"],
+                  "perSeriesAligner": "ALIGN_RATE"
+                }
+              }
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            },
+            "thresholds": [
+              {
+                "value": 5,
+                "direction": "ABOVE",
+                "displayText": "Healthy"
+              },
+              {
+                "value": 3,
+                "direction": "BELOW",
+                "displayText": "Low Activity"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 6,
+        "yPos": 1,
+        "width": 6,
+        "height": 4,
+        "widget": {
+          "title": "Data Freshness (MongoDB → GCS Lag)",
+          "xyChart": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/data_freshness_lag\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "60s",
+                    "perSeriesAligner": "ALIGN_MEAN",
+                    "crossSeriesReducer": "REDUCE_PERCENTILE_95",
+                    "groupByFields": ["metric.label.collection_name"]
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "targetAxis": "Y1",
+              "legendTemplate": "${metric.label.collection_name}"
+            }],
+            "yAxis": {
+              "label": "Lag (seconds)",
+              "scale": "LINEAR"
+            },
+            "thresholds": [
+              {
+                "value": 30,
+                "label": "SLA Threshold (30s)"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "yPos": 5,
+        "width": 8,
+        "height": 4,
+        "widget": {
+          "title": "Document Volume by Collection (Hourly)",
+          "xyChart": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/documents_processed\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "3600s",
+                    "perSeriesAligner": "ALIGN_SUM",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": ["metric.label.collection_name"]
+                  }
+                }
+              },
+              "plotType": "STACKED_BAR",
+              "targetAxis": "Y1",
+              "legendTemplate": "${metric.label.collection_name}"
+            }],
+            "yAxis": {
+              "label": "Documents",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 8,
+        "yPos": 5,
+        "width": 4,
+        "height": 4,
+        "widget": {
+          "title": "CRUD Operation Distribution",
+          "pieChart": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/operation_type_count\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "3600s",
+                    "perSeriesAligner": "ALIGN_SUM",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": ["metric.label.operation_type"]
+                  }
+                }
+              }
+            }],
+            "chartType": "DONUT"
+          }
+        }
+      },
+      {
+        "yPos": 9,
+        "width": 6,
+        "height": 4,
+        "widget": {
+          "title": "Data Quality Score by Collection",
+          "xyChart": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/data_quality_score\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "300s",
+                    "perSeriesAligner": "ALIGN_MEAN",
+                    "crossSeriesReducer": "REDUCE_MEAN",
+                    "groupByFields": ["metric.label.collection_name"]
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "targetAxis": "Y1",
+              "legendTemplate": "${metric.label.collection_name}"
+            }],
+            "yAxis": {
+              "label": "Quality Score (0-100)",
+              "scale": "LINEAR"
+            },
+            "thresholds": [
+              {
+                "value": 90,
+                "label": "Good Quality",
+                "direction": "ABOVE"
+              },
+              {
+                "value": 70,
+                "label": "Acceptable",
+                "direction": "ABOVE"
+              },
+              {
+                "value": 50,
+                "label": "Poor Quality",
+                "direction": "BELOW"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 6,
+        "yPos": 9,
+        "width": 6,
+        "height": 4,
+        "widget": {
+          "title": "Schema Consistency Issues",
+          "xyChart": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/schema_violations\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "300s",
+                    "perSeriesAligner": "ALIGN_RATE",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": ["metric.label.collection_name", "metric.label.violation_type"]
+                  }
+                }
+              },
+              "plotType": "STACKED_AREA",
+              "targetAxis": "Y1",
+              "legendTemplate": "${metric.label.collection_name} - ${metric.label.violation_type}"
+            }],
+            "yAxis": {
+              "label": "Violations/min",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 13,
+        "width": 12,
+        "height": 4,
+        "widget": {
+          "title": "Business Activity Heatmap (Collection Activity by Hour)",
+          "xyChart": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/collection_activity_hourly\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "3600s",
+                    "perSeriesAligner": "ALIGN_RATE",
+                    "crossSeriesReducer": "REDUCE_MEAN",
+                    "groupByFields": ["metric.label.collection_name", "metric.label.hour_of_day"]
+                  }
+                }
+              },
+              "plotType": "HEATMAP",
+              "targetAxis": "Y1"
+            }],
+            "yAxis": {
+              "label": "Collection",
+              "scale": "LINEAR"
+            },
+            "xAxis": {
+              "label": "Hour of Day (UTC)",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "yPos": 17,
+        "width": 4,
+        "height": 3,
+        "widget": {
+          "title": "Empty/Null Document Ratio",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/empty_document_ratio\" AND resource.type=\"cloud_run_revision\"",
+                "aggregation": {
+                  "alignmentPeriod": "300s",
+                  "perSeriesAligner": "ALIGN_MEAN",
+                  "crossSeriesReducer": "REDUCE_MEAN"
+                }
+              }
+            },
+            "gaugeView": {
+              "lowerBound": 0,
+              "upperBound": 100
+            },
+            "thresholds": [
+              {
+                "value": 5,
+                "direction": "BELOW",
+                "displayText": "Excellent"
+              },
+              {
+                "value": 10,
+                "direction": "BELOW", 
+                "displayText": "Good"
+              },
+              {
+                "value": 20,
+                "direction": "ABOVE",
+                "displayText": "Poor"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 4,
+        "yPos": 17,
+        "width": 4,
+        "height": 3,
+        "widget": {
+          "title": "Duplicate Detection Rate",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/duplicate_rate\" AND resource.type=\"cloud_run_revision\"",
+                "aggregation": {
+                  "alignmentPeriod": "300s",
+                  "perSeriesAligner": "ALIGN_MEAN",
+                  "crossSeriesReducer": "REDUCE_MEAN"
+                }
+              }
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            },
+            "thresholds": [
+              {
+                "value": 1,
+                "direction": "BELOW",
+                "displayText": "Normal"
+              },
+              {
+                "value": 5,
+                "direction": "ABOVE",
+                "displayText": "High"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 8,
+        "yPos": 17,
+        "width": 4,
+        "height": 3,
+        "widget": {
+          "title": "Data Completeness Score",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/data_completeness\" AND resource.type=\"cloud_run_revision\"",
+                "aggregation": {
+                  "alignmentPeriod": "300s",
+                  "perSeriesAligner": "ALIGN_MEAN",
+                  "crossSeriesReducer": "REDUCE_MEAN"
+                }
+              }
+            },
+            "gaugeView": {
+              "lowerBound": 0,
+              "upperBound": 100
+            },
+            "thresholds": [
+              {
+                "value": 95,
+                "direction": "ABOVE",
+                "displayText": "Excellent"
+              },
+              {
+                "value": 80,
+                "direction": "ABOVE",
+                "displayText": "Good"
+              },
+              {
+                "value": 60,
+                "direction": "BELOW",
+                "displayText": "Poor"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "yPos": 20,
+        "width": 6,
+        "height": 4,
+        "widget": {
+          "title": "Collection Growth Trends (7-day)",
+          "xyChart": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/collection_size\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "86400s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": ["metric.label.collection_name"]
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "targetAxis": "Y1",
+              "legendTemplate": "${metric.label.collection_name}"
+            }],
+            "yAxis": {
+              "label": "Document Count",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 6,
+        "yPos": 20,
+        "width": 6,
+        "height": 4,
+        "widget": {
+          "title": "Field Cardinality Analysis",
+          "table": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/field_cardinality\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "3600s",
+                    "perSeriesAligner": "ALIGN_MEAN",
+                    "crossSeriesReducer": "REDUCE_MEAN",
+                    "groupByFields": [
+                      "metric.label.collection_name",
+                      "metric.label.field_name"
+                    ]
+                  }
+                }
+              }
+            }],
+            "columnDisplayOrder": [
+              "collection_name",
+              "field_name", 
+              "cardinality",
+              "uniqueness_ratio"
+            ]
+          }
+        }
+      },
+      {
+        "yPos": 24,
+        "width": 12,
+        "height": 4,
+        "widget": {
+          "title": "Data Anomaly Detection",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"logging.googleapis.com/user/anomaly_score\" AND resource.type=\"cloud_run_revision\"",
+                    "aggregation": {
+                      "alignmentPeriod": "300s",
+                      "perSeriesAligner": "ALIGN_MAX",
+                      "crossSeriesReducer": "REDUCE_MAX",
+                      "groupByFields": ["metric.label.collection_name"]
+                    }
+                  }
+                },
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "legendTemplate": "${metric.label.collection_name}"
+              },
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"logging.googleapis.com/user/anomaly_threshold\" AND resource.type=\"cloud_run_revision\"",
+                    "aggregation": {
+                      "alignmentPeriod": "300s",
+                      "perSeriesAligner": "ALIGN_MEAN"
+                    }
+                  }
+                },
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "legendTemplate": "Threshold"
+              }
+            ],
+            "yAxis": {
+              "label": "Anomaly Score",
+              "scale": "LINEAR"
+            },
+            "thresholds": [
+              {
+                "value": 0.8,
+                "label": "Critical Anomaly",
+                "direction": "ABOVE"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "yPos": 28,
+        "width": 6,
+        "height": 3,
+        "widget": {
+          "title": "Top 10 Most Active Collections",
+          "table": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/documents_processed\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "3600s",
+                    "perSeriesAligner": "ALIGN_RATE",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": ["metric.label.collection_name"]
+                  }
+                }
+              }
+            }],
+            "columnDisplayOrder": [
+              "collection_name",
+              "documents_per_hour",
+              "percentage_of_total"
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 6,
+        "yPos": 28,
+        "width": 6,
+        "height": 3,
+        "widget": {
+          "title": "Data Quality Recommendations",
+          "text": {
+            "content": "**Quality Check Priorities**:\n\n1. **High Volume Collections**: Focus on collections with >1000 docs/hour\n2. **Schema Violations**: Review collections with >5% schema inconsistency\n3. **Empty Documents**: Investigate collections with >10% empty/null ratio\n4. **Duplicates**: Check collections with >1% duplicate rate\n5. **Anomalies**: Review collections with anomaly score >0.6\n\n**Next Steps**:\n- Configure collection-specific quality rules\n- Set up data validation pipelines\n- Implement schema registry",
+            "format": "MARKDOWN"
+          }
+        }
+      }
+    ]
+  }
+}

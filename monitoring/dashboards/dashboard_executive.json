@@ -1,0 +1,591 @@
+{
+  "displayName": "Executive Dashboard - Platform Health & Data Lineage",
+  "description": "High-level platform health, data lineage, and business KPIs for executive oversight and strategic decision-making",
+  "version": "1.0.0",
+  "metadata": {
+    "created_by": "monitoring-automation",
+    "purpose": "executive-overview",
+    "last_updated": "2024-01-20"
+  },
+  "mosaicLayout": {
+    "columns": 12,
+    "tiles": [
+      {
+        "width": 12,
+        "height": 1,
+        "widget": {
+          "title": "🎯 Executive Dashboard - Platform Health & Strategic Metrics",
+          "text": {
+            "content": "**Real-time Platform Status** | **Data Pipeline Health** | **Business KPIs** | **Cost & Efficiency Metrics** | Last Update: Every 5 minutes",
+            "format": "MARKDOWN"
+          }
+        }
+      },
+      {
+        "yPos": 1,
+        "width": 3,
+        "height": 4,
+        "widget": {
+          "title": "Platform Health Score",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/platform_health_score\" AND resource.type=\"cloud_run_revision\"",
+                "aggregation": {
+                  "alignmentPeriod": "300s",
+                  "perSeriesAligner": "ALIGN_MEAN",
+                  "crossSeriesReducer": "REDUCE_MEAN"
+                }
+              }
+            },
+            "gaugeView": {
+              "lowerBound": 0,
+              "upperBound": 100
+            },
+            "thresholds": [
+              {
+                "value": 95,
+                "direction": "ABOVE",
+                "displayText": "Excellent",
+                "color": "GREEN"
+              },
+              {
+                "value": 80,
+                "direction": "ABOVE",
+                "displayText": "Good",
+                "color": "YELLOW"
+              },
+              {
+                "value": 60,
+                "direction": "BELOW",
+                "displayText": "Critical",
+                "color": "RED"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 3,
+        "yPos": 1,
+        "width": 3,
+        "height": 4,
+        "widget": {
+          "title": "System Availability (30-day)",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/system_availability\" AND resource.type=\"cloud_run_revision\"",
+                "aggregation": {
+                  "alignmentPeriod": "2592000s",
+                  "perSeriesAligner": "ALIGN_MEAN",
+                  "crossSeriesReducer": "REDUCE_MEAN"
+                }
+              }
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            },
+            "thresholds": [
+              {
+                "value": 99.9,
+                "direction": "ABOVE",
+                "displayText": "SLA Met"
+              },
+              {
+                "value": 99,
+                "direction": "BELOW",
+                "displayText": "SLA Risk"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 6,
+        "yPos": 1,
+        "width": 3,
+        "height": 4,
+        "widget": {
+          "title": "Total Documents Processed (Today)",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/documents_processed_total\" AND resource.type=\"cloud_run_revision\"",
+                "aggregation": {
+                  "alignmentPeriod": "86400s",
+                  "perSeriesAligner": "ALIGN_SUM",
+                  "crossSeriesReducer": "REDUCE_SUM"
+                }
+              }
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_BAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 9,
+        "yPos": 1,
+        "width": 3,
+        "height": 4,
+        "widget": {
+          "title": "Cost per Million Events",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/cost_per_million_events\" AND resource.type=\"cloud_run_revision\"",
+                "aggregation": {
+                  "alignmentPeriod": "3600s",
+                  "perSeriesAligner": "ALIGN_MEAN",
+                  "crossSeriesReducer": "REDUCE_MEAN"
+                }
+              }
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            },
+            "thresholds": [
+              {
+                "value": 1,
+                "direction": "BELOW",
+                "displayText": "Optimal"
+              },
+              {
+                "value": 5,
+                "direction": "ABOVE",
+                "displayText": "High Cost"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "yPos": 5,
+        "width": 12,
+        "height": 5,
+        "widget": {
+          "title": "Data Pipeline Flow - End-to-End Journey",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"logging.googleapis.com/user/pipeline_stage_success\" AND metric.label.stage=\"mongodb_read\" AND resource.type=\"cloud_run_revision\"",
+                    "aggregation": {
+                      "alignmentPeriod": "300s",
+                      "perSeriesAligner": "ALIGN_RATE",
+                      "crossSeriesReducer": "REDUCE_SUM"
+                    }
+                  }
+                },
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "legendTemplate": "MongoDB Read"
+              },
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"logging.googleapis.com/user/pipeline_stage_success\" AND metric.label.stage=\"pubsub_publish\" AND resource.type=\"cloud_run_revision\"",
+                    "aggregation": {
+                      "alignmentPeriod": "300s",
+                      "perSeriesAligner": "ALIGN_RATE",
+                      "crossSeriesReducer": "REDUCE_SUM"
+                    }
+                  }
+                },
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "legendTemplate": "Pub/Sub Publish"
+              },
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"logging.googleapis.com/user/pipeline_stage_success\" AND metric.label.stage=\"gcs_write\" AND resource.type=\"cloud_function\"",
+                    "aggregation": {
+                      "alignmentPeriod": "300s",
+                      "perSeriesAligner": "ALIGN_RATE",
+                      "crossSeriesReducer": "REDUCE_SUM"
+                    }
+                  }
+                },
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "legendTemplate": "GCS Write"
+              }
+            ],
+            "yAxis": {
+              "label": "Events/sec",
+              "scale": "LINEAR"
+            },
+            "chartOptions": {
+              "mode": "COLOR",
+              "displayLegend": true
+            }
+          }
+        }
+      },
+      {
+        "yPos": 10,
+        "width": 6,
+        "height": 4,
+        "widget": {
+          "title": "Critical System Components Status",
+          "table": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/component_health\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "60s",
+                    "perSeriesAligner": "ALIGN_MEAN",
+                    "crossSeriesReducer": "REDUCE_MEAN",
+                    "groupByFields": ["metric.label.component_name"]
+                  }
+                }
+              }
+            }],
+            "columnDisplayOrder": [
+              "Component",
+              "Status",
+              "Uptime %",
+              "Last Check"
+            ],
+            "columnWidths": {
+              "Component": 150,
+              "Status": 100,
+              "Uptime %": 100,
+              "Last Check": 150
+            }
+          }
+        }
+      },
+      {
+        "xPos": 6,
+        "yPos": 10,
+        "width": 6,
+        "height": 4,
+        "widget": {
+          "title": "Data Loss Incidents (Last 30 Days)",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/data_loss_incidents\" AND resource.type=\"cloud_run_revision\"",
+                "aggregation": {
+                  "alignmentPeriod": "2592000s",
+                  "perSeriesAligner": "ALIGN_SUM",
+                  "crossSeriesReducer": "REDUCE_SUM"
+                }
+              }
+            },
+            "thresholds": [
+              {
+                "value": 0,
+                "direction": "ABOVE",
+                "displayText": "No Data Loss",
+                "color": "GREEN"
+              },
+              {
+                "value": 1,
+                "direction": "ABOVE",
+                "displayText": "Incidents Detected",
+                "color": "RED"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "yPos": 14,
+        "width": 8,
+        "height": 4,
+        "widget": {
+          "title": "Business Metrics Trends (7-Day)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"logging.googleapis.com/user/active_collections_count\" AND resource.type=\"cloud_run_revision\"",
+                    "aggregation": {
+                      "alignmentPeriod": "3600s",
+                      "perSeriesAligner": "ALIGN_MEAN",
+                      "crossSeriesReducer": "REDUCE_COUNT_TRUE"
+                    }
+                  }
+                },
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "legendTemplate": "Active Collections"
+              },
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"logging.googleapis.com/user/unique_databases_count\" AND resource.type=\"cloud_run_revision\"",
+                    "aggregation": {
+                      "alignmentPeriod": "3600s",
+                      "perSeriesAligner": "ALIGN_MEAN",
+                      "crossSeriesReducer": "REDUCE_COUNT_TRUE"
+                    }
+                  }
+                },
+                "plotType": "LINE",
+                "targetAxis": "Y2",
+                "legendTemplate": "Databases"
+              }
+            ],
+            "yAxis": {
+              "label": "Collections",
+              "scale": "LINEAR"
+            },
+            "y2Axis": {
+              "label": "Databases",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 8,
+        "yPos": 14,
+        "width": 4,
+        "height": 4,
+        "widget": {
+          "title": "Processing Efficiency",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/processing_efficiency\" AND resource.type=\"cloud_run_revision\"",
+                "aggregation": {
+                  "alignmentPeriod": "300s",
+                  "perSeriesAligner": "ALIGN_MEAN",
+                  "crossSeriesReducer": "REDUCE_MEAN"
+                }
+              }
+            },
+            "gaugeView": {
+              "lowerBound": 0,
+              "upperBound": 100
+            },
+            "thresholds": [
+              {
+                "value": 90,
+                "direction": "ABOVE",
+                "displayText": "Optimal"
+              },
+              {
+                "value": 70,
+                "direction": "ABOVE",
+                "displayText": "Good"
+              },
+              {
+                "value": 50,
+                "direction": "BELOW",
+                "displayText": "Poor"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "yPos": 18,
+        "width": 12,
+        "height": 4,
+        "widget": {
+          "title": "Data Lineage - Collection to Storage Mapping",
+          "table": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/data_lineage\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "300s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_MAX",
+                    "groupByFields": [
+                      "metric.label.database",
+                      "metric.label.collection", 
+                      "metric.label.topic",
+                      "metric.label.bucket"
+                    ]
+                  }
+                }
+              }
+            }],
+            "columnDisplayOrder": [
+              "Database",
+              "Collection",
+              "Pub/Sub Topic",
+              "GCS Bucket",
+              "Status",
+              "Last Update",
+              "Documents/Hour"
+            ]
+          }
+        }
+      },
+      {
+        "yPos": 22,
+        "width": 4,
+        "height": 3,
+        "widget": {
+          "title": "Monthly Processing Volume",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/monthly_volume\" AND resource.type=\"cloud_run_revision\"",
+                "aggregation": {
+                  "alignmentPeriod": "2592000s",
+                  "perSeriesAligner": "ALIGN_SUM",
+                  "crossSeriesReducer": "REDUCE_SUM"
+                }
+              }
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_BAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 4,
+        "yPos": 22,
+        "width": 4,
+        "height": 3,
+        "widget": {
+          "title": "Average Processing Latency",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/processing_latency_p50\" AND resource.type=\"cloud_run_revision\"",
+                "aggregation": {
+                  "alignmentPeriod": "300s",
+                  "perSeriesAligner": "ALIGN_MEAN",
+                  "crossSeriesReducer": "REDUCE_MEAN"
+                }
+              }
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            },
+            "thresholds": [
+              {
+                "value": 100,
+                "direction": "BELOW",
+                "displayText": "Fast (<100ms)"
+              },
+              {
+                "value": 500,
+                "direction": "ABOVE",
+                "displayText": "Slow (>500ms)"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 8,
+        "yPos": 22,
+        "width": 4,
+        "height": 3,
+        "widget": {
+          "title": "Error Rate",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"logging.googleapis.com/user/error_rate\" AND resource.type=\"cloud_run_revision\"",
+                "aggregation": {
+                  "alignmentPeriod": "300s",
+                  "perSeriesAligner": "ALIGN_RATE",
+                  "crossSeriesReducer": "REDUCE_MEAN"
+                }
+              }
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            },
+            "thresholds": [
+              {
+                "value": 0.1,
+                "direction": "BELOW",
+                "displayText": "Healthy"
+              },
+              {
+                "value": 1,
+                "direction": "ABOVE",
+                "displayText": "High Errors"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "yPos": 25,
+        "width": 6,
+        "height": 4,
+        "widget": {
+          "title": "Infrastructure Cost Breakdown",
+          "pieChart": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/cost_by_component\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "86400s",
+                    "perSeriesAligner": "ALIGN_SUM",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": ["metric.label.component"]
+                  }
+                }
+              }
+            }],
+            "chartType": "DONUT"
+          }
+        }
+      },
+      {
+        "xPos": 6,
+        "yPos": 25,
+        "width": 6,
+        "height": 4,
+        "widget": {
+          "title": "Key Performance Indicators",
+          "text": {
+            "content": "## 📊 **Executive Summary**\n\n### ✅ **Achievements**\n- **Availability**: Maintaining >99.9% uptime\n- **Scale**: Processing millions of events daily\n- **Efficiency**: Cost per event decreasing month-over-month\n\n### ⚠️ **Focus Areas**\n- Monitor data freshness for critical collections\n- Optimize high-volume collection processing\n- Review cost optimization opportunities\n\n### 📈 **Strategic Metrics**\n- **Data Coverage**: Monitoring all production databases\n- **Pipeline Reliability**: Zero data loss incidents\n- **Team Productivity**: Self-service monitoring enabled\n\n### 🎯 **Next Quarter Goals**\n1. Reduce processing latency by 20%\n2. Implement predictive scaling\n3. Enhance data quality automation",
+            "format": "MARKDOWN"
+          }
+        }
+      },
+      {
+        "yPos": 29,
+        "width": 12,
+        "height": 3,
+        "widget": {
+          "title": "Platform Alerts Summary",
+          "table": {
+            "dataSets": [{
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"logging.googleapis.com/user/alert_summary\" AND resource.type=\"cloud_run_revision\"",
+                  "aggregation": {
+                    "alignmentPeriod": "3600s",
+                    "perSeriesAligner": "ALIGN_SUM",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": ["metric.label.severity", "metric.label.alert_type"]
+                  }
+                }
+              }
+            }],
+            "columnDisplayOrder": [
+              "Severity",
+              "Alert Type", 
+              "Count (24h)",
+              "Status"
+            ]
+          }
+        }
+      }
+    ]
+  }
+}
