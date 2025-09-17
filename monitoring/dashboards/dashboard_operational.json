@@ -61,7 +61,8 @@
           "thresholds": [
             {
               "value": 1.0,
-              "direction": "ABOVE"
+              "direction": "ABOVE",
+              "color": "RED"
             }
           ]
         }
