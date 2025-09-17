@@ -166,18 +166,25 @@ def extract_message_data(event: Dict[str, Any]) -> Tuple[str, Dict[str, Any], st
         ValueError: If message cannot be decoded
     """
     try:
-        # Get Pub/Sub message ID for idempotency
-        pubsub_message_id = event.get('messageId', '')
-        
-        # Get message attributes if present
-        attributes = event.get('attributes', {})
+        # Handle EventArc/CloudEvent wrapper format
+        if 'message' in event:
+            # EventArc wrapped format
+            message = event['message']
+            pubsub_message_id = message.get('messageId', message.get('message_id', ''))
+            attributes = message.get('attributes', {})
+            data_field = message.get('data')
+        else:
+            # Direct format (for testing)
+            pubsub_message_id = event.get('messageId', '')
+            attributes = event.get('attributes', {})
+            data_field = event.get('data')
         
         # Extract the base64 encoded data
-        if 'data' not in event:
+        if not data_field:
             raise ValueError('No data field in Pub/Sub message')
         
         # Decode base64 to get raw bytes
-        raw_bytes = base64.b64decode(event['data'])
+        raw_bytes = base64.b64decode(data_field)
         
         # Check if this is a nested Pub/Sub message (from push subscription)
         # by attempting to parse as JSON and looking for nested structure

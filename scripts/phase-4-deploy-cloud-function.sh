@@ -123,11 +123,31 @@ gcloud functions deploy "$CLOUD_FUNCTION_NAME" \
   --timeout=30s \
   --min-instances=0 \
   --max-instances=100 \
-  --max-instance-request-concurrency=1 \
-  --ingress-settings=internal-only \
-  --retry-on-failure
+  --concurrency=1 \
+  --ingress-settings=internal-only
 
 echo "✅ Cloud Function deployed successfully"
+
+echo "🔐 Setting Cloud Run invoker permissions..."
+
+# Grant to service account
+gcloud run services add-iam-policy-binding "$CLOUD_FUNCTION_NAME" \
+  --member="serviceAccount:${CLOUD_FUNCTION_SA}" \
+  --role="roles/run.invoker" \
+  --region="$REGION" \
+  --project="$PROJECT_ID" \
+  --quiet || true
+
+# Grant to Pub/Sub service account
+PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
+gcloud run services add-iam-policy-binding "$CLOUD_FUNCTION_NAME" \
+  --member="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com" \
+  --role="roles/run.invoker" \
+  --region="$REGION" \
+  --project="$PROJECT_ID" \
+  --quiet || true
+
+echo "✅ Invoker permissions configured"
 
 # Step 6: Configure Pub/Sub subscription retry policy
 echo "📮 Configuring Pub/Sub subscription retry policy..."
