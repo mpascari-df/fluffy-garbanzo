@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# main.py - Production MongoDB Change Stream Ingestor
-# Async processing with comprehensive logging and Gunicorn compatibility
+# main.py - Production MongoDB Change Stream Ingestor with Enhanced Monitoring
+# Async processing with comprehensive logging, monitoring metrics, and Gunicorn compatibility
 
 import os
 import json
@@ -14,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
 import uuid
+from decimal import Decimal
 
 import motor.motor_asyncio
 from bson import json_util
@@ -42,10 +43,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ============================================================================
+# JSON SERIALIZATION HELPER FOR MONITORING
+# ============================================================================
+def json_serializer(obj):
+    """JSON serializer for objects not serializable by default"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, bytes):
+        return obj.decode('utf-8', errors='ignore')
+    if hasattr(obj, '__dict__'):
+        return str(obj)
+    return str(obj)
+
 # Log service startup
 logger.info("="*60)
 logger.info("🚀 MongoDB Change Stream Ingestor Starting")
-logger.info(f"Version: 2.0.0")
+logger.info(f"Version: 2.1.0 (with monitoring)")
 logger.info(f"Python: {sys.version}")
 logger.info(f"Process ID: {os.getpid()}")
 logger.info(f"Environment: {os.environ.get('ENVIRONMENT', 'production')}")
@@ -291,7 +307,7 @@ class AsyncChangeStreamConsumer:
             return None
     
     async def _process_change(self, change: Dict[str, Any]):
-        """Process a single change event with detailed logging."""
+        """Process a single change event with detailed logging and monitoring."""
         try:
             # Extract metadata
             operation = change.get('operationType', 'unknown')
@@ -305,7 +321,40 @@ class AsyncChangeStreamConsumer:
             elif change.get('fullDocument'):
                 doc_id = change['fullDocument'].get('_id')
             
-            # Log the operation
+            # Calculate document size
+            doc_size = 0
+            if change.get('fullDocument'):
+                doc_size = len(json.dumps(change['fullDocument'], default=json_serializer))
+            elif change.get('documentKey'):
+                doc_size = len(json.dumps(change['documentKey'], default=json_serializer))
+            
+            # STRUCTURED METRIC LOG - For monitoring
+            logger.info(
+                "METRIC:change_stream_event",
+                extra={
+                    'labels': {
+                        'component': 'cloud_run_ingestor',
+                        'pipeline_stage': 'ingestion',
+                        'collection': collection,
+                        'operation': operation,
+                        'database': database
+                    },
+                    'jsonPayload': {
+                        'event_type': 'change_stream_event',
+                        'collection': collection,
+                        'operation': operation,
+                        'database': database,
+                        'document_id': str(doc_id) if doc_id else 'unknown',
+                        'document_size_bytes': doc_size,
+                        'queue_depth': self.event_queue.qsize(),
+                        'queue_capacity': self.config.QUEUE_MAX_SIZE,
+                        'timestamp_millis': int(time.time() * 1000),
+                        'session_event_count': self.session_event_count
+                    }
+                }
+            )
+            
+            # Original detailed logging (keep as is for debugging)
             if self.config.ENABLE_DETAILED_LOGGING or collection in self.config.COLLECTIONS_TO_LOG:
                 logger.info(f"📝 {operation.upper()} on {collection} - ID: {doc_id}")
             
@@ -324,7 +373,7 @@ class AsyncChangeStreamConsumer:
             # Update oplog lag if available
             if change.get('clusterTime'):
                 self.metrics.update_oplog_lag(change['clusterTime'])
-            
+                
         except Exception as e:
             logger.error(f"❌ Error processing change: {e}", exc_info=True)
             self.metrics.record_error('process_change', str(e))
@@ -511,20 +560,23 @@ class AsyncPublisher:
         logger.info(f"👷 Worker {worker_id} stopped. Published: {worker_published}, Failed: {worker_failed}")
     
     async def _publish_event(self, event: Dict[str, Any]) -> bool:
-        """Publish a single event to Pub/Sub with retry logic."""
+        """Publish a single event to Pub/Sub with retry logic and monitoring."""
         start_time = time.time()
         collection = event.get('collection', 'unknown')
         operation = event.get('operation', 'unknown')
+        correlation_id = event.get('correlation_id', str(uuid.uuid4()))
         
         try:
             # Serialize event
             message_data = json_util.dumps(event).encode('utf-8')
+            message_size = len(message_data)
             
             # Add attributes for filtering
             attributes = {
                 'operation': operation,
                 'collection': collection,
-                'database': event.get('database', 'unknown')
+                'database': event.get('database', 'unknown'),
+                'correlation_id': correlation_id  # Add for lineage tracking
             }
             
             # Publish with retry
@@ -548,19 +600,50 @@ class AsyncPublisher:
                     self.metrics.record_publish_success(collection, publish_latency)
                     self.total_published += 1
                     
+                    # STRUCTURED METRIC LOG - For monitoring
+                    logger.info(
+                        "METRIC:pubsub_published",
+                        extra={
+                            'labels': {
+                                'component': 'cloud_run_ingestor',
+                                'pipeline_stage': 'publish',
+                                'collection': collection,
+                                'operation': operation
+                            },
+                            'jsonPayload': {
+                                'event_type': 'pubsub_published',
+                                'collection': collection,
+                                'operation': operation,
+                                'message_id': message_id[:8] if message_id else 'unknown',
+                                'correlation_id': correlation_id,
+                                'message_size_bytes': message_size,
+                                'publish_latency_ms': publish_latency * 1000,
+                                'attempt': attempt + 1,
+                                'timestamp_millis': int(time.time() * 1000)
+                            }
+                        }
+                    )
+                    
                     # Reset DLQ counter on success
                     self.consecutive_dlq = 0
                     
-                    # Log successful publishes for important collections or if detailed logging
+                    # Original logging (keep for debugging)
                     if collection in ['customers', 'orders', 'products'] or self.config.ENABLE_DETAILED_LOGGING:
-                        logger.debug(
-                            f"✉️ Published {operation} for {collection} "
-                            f"in {publish_latency:.3f}s - MessageID: {message_id[:8]}..."
-                        )
+                        logger.debug(f"✉️ Published {operation} for {collection} in {publish_latency:.3f}s")
                     
                     # Warn on slow publishes
                     if publish_latency > 1.0:
-                        logger.warning(f"⚠️ Slow publish: {publish_latency:.3f}s for {collection}")
+                        logger.warning(
+                            "METRIC:slow_publish",
+                            extra={
+                                'labels': {'component': 'cloud_run_ingestor'},
+                                'jsonPayload': {
+                                    'event_type': 'slow_publish',
+                                    'collection': collection,
+                                    'latency_seconds': publish_latency
+                                }
+                            }
+                        )
                     
                     return True
                     
@@ -573,7 +656,25 @@ class AsyncPublisher:
                         raise e
             
         except Exception as e:
-            logger.error(f"❌ Failed to publish {operation} for {collection}: {e}")
+            logger.error(
+                "METRIC:publish_failed",
+                extra={
+                    'labels': {
+                        'component': 'cloud_run_ingestor',
+                        'pipeline_stage': 'publish',
+                        'collection': collection,
+                        'error_type': type(e).__name__
+                    },
+                    'jsonPayload': {
+                        'event_type': 'publish_failed',
+                        'collection': collection,
+                        'operation': operation,
+                        'correlation_id': correlation_id,
+                        'error': str(e),
+                        'timestamp_millis': int(time.time() * 1000)
+                    }
+                }
+            )
             self.metrics.record_publish_failure(collection)
             self.total_failed += 1
             
@@ -756,7 +857,7 @@ class ChangeStreamIngestionService:
         
         return {
             'service': 'change-stream-ingestion',
-            'version': '2.0.0',
+            'version': '2.1.0',
             'status': 'running' if self.consumer.is_running else 'stopped',
             'uptime_seconds': uptime,
             'uptime_human': f"{uptime/3600:.1f} hours",
@@ -790,7 +891,7 @@ def health_check():
         return jsonify({
             'status': 'starting',
             'service': 'mongo-ingestor-async',
-            'version': '2.0.0',
+            'version': '2.1.0',
             'message': 'Service initializing',
             'uptime_seconds': uptime
         }), 200
@@ -800,7 +901,7 @@ def health_check():
         return jsonify({
             'status': 'healthy',
             'service': 'mongo-ingestor-async',
-            'version': '2.0.0',
+            'version': '2.1.0',
             'uptime_seconds': uptime,
             'queue_depth': service.consumer.event_queue.qsize(),
             'events_processed': service.metrics.total_events_processed
@@ -809,7 +910,7 @@ def health_check():
         return jsonify({
             'status': 'unhealthy',
             'service': 'mongo-ingestor-async',
-            'version': '2.0.0',
+            'version': '2.1.0',
             'error': 'Service not running',
             'uptime_seconds': uptime
         }), 503

@@ -1,5 +1,5 @@
 # metrics_collector.py - Comprehensive metrics collection and monitoring
-# Provides observability for the ingestion pipeline
+# Provides observability for the ingestion pipeline with structured logging
 
 import asyncio
 import logging
@@ -294,7 +294,7 @@ class MetricsCollector:
         return series
     
     async def start_reporting(self):
-        """Start periodic metrics reporting."""
+        """Start periodic metrics reporting with structured logging."""
         while True:
             try:
                 await asyncio.sleep(self.config.METRICS_REPORTING_INTERVAL)
@@ -302,14 +302,36 @@ class MetricsCollector:
                 # Calculate rates
                 self.calculate_rates()
                 
+                # STRUCTURED METRIC LOG - System stats
+                stats = self.get_metrics()
+                logger.info(
+                    "METRIC:system_stats",
+                    extra={
+                        'labels': {
+                            'component': 'cloud_run_ingestor',
+                            'pipeline_stage': 'system'
+                        },
+                        'jsonPayload': {
+                            'event_type': 'system_stats',
+                            'uptime_seconds': stats['summary']['uptime_seconds'],
+                            'total_processed': stats['summary']['total_events_processed'],
+                            'total_published': stats['summary']['total_events_published'],
+                            'total_failed': stats['summary']['total_events_failed'],
+                            'success_rate': stats['summary']['success_rate'],
+                            'events_per_second': stats['rates']['events_per_second'],
+                            'oplog_lag_seconds': stats['oplog']['lag_seconds'],
+                            'collections': stats['collections'],
+                            'publish_p50_ms': stats['latency']['publish_p50_ms'],
+                            'publish_p95_ms': stats['latency']['publish_p95_ms'],
+                            'publish_p99_ms': stats['latency']['publish_p99_ms'],
+                            'timestamp_millis': int(time.time() * 1000)
+                        }
+                    }
+                )
+                
                 # Export to Cloud Monitoring
                 if self.config.ENABLE_METRICS_EXPORT:
                     await self.export_metrics()
-                
-                # Log summary
-                if self.config.ENABLE_DETAILED_LOGGING:
-                    metrics = self.get_metrics()
-                    logger.info(f"Metrics summary: {metrics['summary']}")
                     
             except asyncio.CancelledError:
                 break
@@ -323,8 +345,28 @@ class MetricsCollector:
             if self.config.ENABLE_METRICS_EXPORT:
                 await self.export_metrics()
             
-            # Log final summary
+            # Log final summary with structured metrics
             metrics = self.get_metrics()
+            logger.info(
+                "METRIC:final_summary",
+                extra={
+                    'labels': {
+                        'component': 'cloud_run_ingestor',
+                        'pipeline_stage': 'system'
+                    },
+                    'jsonPayload': {
+                        'event_type': 'final_summary',
+                        'total_runtime_seconds': time.time() - self.start_time,
+                        'total_processed': metrics['summary']['total_events_processed'],
+                        'total_published': metrics['summary']['total_events_published'],
+                        'total_failed': metrics['summary']['total_events_failed'],
+                        'final_success_rate': metrics['summary']['success_rate'],
+                        'collections_processed': len(metrics['collections']),
+                        'timestamp_millis': int(time.time() * 1000)
+                    }
+                }
+            )
+            
             logger.info(f"Final metrics summary: {metrics['summary']}")
             
         except Exception as e:

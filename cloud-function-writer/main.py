@@ -1,5 +1,5 @@
 """
-MongoDB Change Stream to GCS Writer - Production Ready
+MongoDB Change Stream to GCS Writer - Production Ready with Monitoring
 Optimized for reliability, idempotency, BSON preservation, and complete observability
 """
 
@@ -228,6 +228,9 @@ def generate_idempotent_filename(
         'data_size_bytes': len(raw_data)
     }
     
+    # Extract correlation ID from attributes if present
+    metadata['correlation_id'] = attributes.get('correlation_id', 'unknown')
+    
     # Default values
     collection = 'unknown'
     operation = 'unknown'
@@ -340,7 +343,8 @@ def write_to_gcs_with_retry(
             'collection': collection,
             'document_id': document_id,
             'received_at': metadata.get('received_at', ''),
-            'data_size': str(metadata.get('data_size_bytes', 0))
+            'data_size': str(metadata.get('data_size_bytes', 0)),
+            'correlation_id': metadata.get('correlation_id', '')
         }
         
         logger.debug(f"⬆️ Starting GCS upload: {blob_path}")
@@ -468,12 +472,7 @@ def process_pubsub_message(cloud_event: CloudEvent) -> None:
     """
     Main entry point for Cloud Function triggered by Pub/Sub.
     Processes MongoDB change stream events and writes to GCS.
-    
-    Guarantees:
-    - Idempotent writes using Pub/Sub message ID
-    - No data loss (fails function if write fails)
-    - Minimal data transformation (preserves BSON)
-    - Complete observability through structured logging
+    Enhanced with structured logging for monitoring.
     """
     # Start tracking for this message
     processing_start = metrics.record_processing_start()
@@ -482,15 +481,26 @@ def process_pubsub_message(cloud_event: CloudEvent) -> None:
     message_id = event_data.get('messageId', 'unknown')
     publish_time = event_data.get('publishTime', '')
     
-    # Log every message received
+    # Extract correlation ID from attributes if present
+    message_obj = event_data.get('message', event_data)
+    attributes = message_obj.get('attributes', {})
+    correlation_id = attributes.get('correlation_id', 'unknown')
+    
+    # STRUCTURED METRIC LOG - Message received
     logger.info(
-        f'📨 Processing message: {message_id[:8]}... - '
-        f'Published: {publish_time}',
+        "METRIC:message_received",
         extra={
-            'event': 'message_received',
-            'pubsub_message_id': message_id,
-            'publish_time': publish_time,
-            'processing_started_at': datetime.now(timezone.utc).isoformat()
+            'labels': {
+                'component': 'cloud_function_writer',
+                'pipeline_stage': 'storage'
+            },
+            'jsonPayload': {
+                'event_type': 'message_received',
+                'message_id': message_id[:8] if message_id else 'unknown',
+                'correlation_id': correlation_id,
+                'publish_time': publish_time,
+                'timestamp_millis': int(time.time() * 1000)
+            }
         }
     )
     
@@ -521,6 +531,8 @@ def process_pubsub_message(cloud_event: CloudEvent) -> None:
         collection = metadata.get('collection', 'unknown')
         operation = metadata.get('operation', 'unknown')
         document_id = metadata.get('document_id', 'unknown')
+        data_size = metadata.get('data_size_bytes', 0)
+        correlation_id = metadata.get('correlation_id', correlation_id)
         
         # Step 3: Write to GCS with retry
         success, gcs_duration = write_to_gcs_with_retry(gcs_path, raw_data, metadata)
@@ -529,26 +541,35 @@ def process_pubsub_message(cloud_event: CloudEvent) -> None:
             # Record failure in metrics
             metrics.record_failure(collection, operation, 'gcs_write_failure')
             
+            # STRUCTURED METRIC LOG - Write failure
+            logger.error(
+                "METRIC:gcs_write_failed",
+                extra={
+                    'labels': {
+                        'component': 'cloud_function_writer',
+                        'pipeline_stage': 'storage',
+                        'collection': collection,
+                        'operation': operation,
+                        'error_type': 'gcs_write_failure'
+                    },
+                    'jsonPayload': {
+                        'event_type': 'gcs_write_failed',
+                        'collection': collection,
+                        'operation': operation,
+                        'document_id': document_id[:20] if document_id else 'unknown',
+                        'correlation_id': correlation_id,
+                        'message_id': message_id[:8] if message_id else 'unknown',
+                        'gcs_path': gcs_path,
+                        'timestamp_millis': int(time.time() * 1000)
+                    }
+                }
+            )
+            
             # Write error context for debugging
             write_error_context(
                 event_data,
                 'Failed to write to GCS after retries',
                 'gcs_write_failure'
-            )
-            
-            logger.error(
-                f'❌ Failed to process message {message_id[:8]}... - '
-                f'Collection: {collection} - '
-                f'Operation: {operation} - '
-                f'Doc: {document_id[:20]}...',
-                extra={
-                    'event': 'message_processing_failed',
-                    'pubsub_message_id': message_id,
-                    'collection': collection,
-                    'operation': operation,
-                    'document_id': document_id,
-                    'failure_reason': 'gcs_write_failure'
-                }
             )
             
             # Raise exception to trigger Cloud Function retry/DLQ
@@ -566,39 +587,59 @@ def process_pubsub_message(cloud_event: CloudEvent) -> None:
             gcs_duration=gcs_duration
         )
         
-        # Log successful processing with complete metrics
+        # STRUCTURED METRIC LOG - Success
         logger.info(
-            f'✅ Successfully processed {operation} for {collection} - '
-            f'Doc: {document_id[:20]}... - '
-            f'Total: {total_duration*1000:.1f}ms - '
-            f'GCS: {gcs_duration*1000:.1f}ms - '
-            f'Message: {message_id[:8]}...',
+            "METRIC:gcs_write_success",
             extra={
-                'event': 'message_processed_success',
-                'pubsub_message_id': message_id,
-                'collection': collection,
-                'operation': operation,
-                'document_id': document_id,
-                'total_latency_ms': total_duration * 1000,
-                'gcs_latency_ms': gcs_duration * 1000,
-                'decode_latency_ms': decode_duration * 1000,
-                'size_bytes': len(raw_data),
-                'gcs_path': gcs_path
+                'labels': {
+                    'component': 'cloud_function_writer',
+                    'pipeline_stage': 'storage',
+                    'collection': collection,
+                    'operation': operation
+                },
+                'jsonPayload': {
+                    'event_type': 'gcs_write_success',
+                    'collection': collection,
+                    'operation': operation,
+                    'document_id': document_id[:20] if document_id else 'unknown',
+                    'correlation_id': correlation_id,
+                    'message_id': message_id[:8] if message_id else 'unknown',
+                    'document_size_bytes': data_size,
+                    'gcs_path': gcs_path,
+                    'total_latency_ms': total_duration * 1000,
+                    'gcs_latency_ms': gcs_duration * 1000,
+                    'decode_latency_ms': decode_duration * 1000,
+                    'timestamp_millis': int(time.time() * 1000)
+                }
             }
         )
         
         # Log periodic statistics
         if metrics.should_log_stats():
             stats = metrics.get_stats_summary()
+            
+            # STRUCTURED METRIC LOG - System stats
             logger.info(
-                f'📊 Processing statistics - '
-                f'Total: {stats["total_processed"]} - '
-                f'Success rate: {stats["success_rate"]} - '
-                f'Throughput: {stats["throughput_msg_per_sec"]} msg/s - '
-                f'Avg latency: {stats["avg_latency_ms"]}ms',
+                "METRIC:function_stats",
                 extra={
-                    'event': 'statistics_summary',
-                    **stats
+                    'labels': {
+                        'component': 'cloud_function_writer',
+                        'pipeline_stage': 'storage'
+                    },
+                    'jsonPayload': {
+                        'event_type': 'function_stats',
+                        'total_processed': stats['total_processed'],
+                        'total_succeeded': stats['total_succeeded'],
+                        'total_failed': stats['total_failed'],
+                        'success_rate': float(stats['success_rate'].rstrip('%')),
+                        'throughput_msg_per_sec': float(stats['throughput_msg_per_sec']),
+                        'avg_latency_ms': float(stats['avg_latency_ms']),
+                        'avg_gcs_latency_ms': float(stats['avg_gcs_latency_ms']),
+                        'collections': stats['collections'],
+                        'operations': stats['operations'],
+                        'total_bytes_processed': stats['total_bytes_processed'],
+                        'timestamp_millis': int(time.time() * 1000)
+                    }
                 }
             )
         
@@ -606,32 +647,31 @@ def process_pubsub_message(cloud_event: CloudEvent) -> None:
         # Data format errors - these won't be fixed by retry
         metrics.record_failure(collection, operation, 'data_format_error')
         
+        # STRUCTURED METRIC LOG - Format error
         logger.error(
-            f'⚠️ Unrecoverable error for message {message_id[:8]}... - '
-            f'Collection: {collection} - '
-            f'Error: {e}',
+            "METRIC:format_error",
             extra={
-                'event': 'message_format_error',
-                'pubsub_message_id': message_id,
-                'collection': collection,
-                'error': str(e),
-                'error_type': 'ValueError'
+                'labels': {
+                    'component': 'cloud_function_writer',
+                    'pipeline_stage': 'storage',
+                    'error_type': 'ValueError'
+                },
+                'jsonPayload': {
+                    'event_type': 'format_error',
+                    'collection': collection,
+                    'message_id': message_id[:8] if message_id else 'unknown',
+                    'correlation_id': correlation_id,
+                    'error': str(e),
+                    'timestamp_millis': int(time.time() * 1000)
+                }
             }
         )
         
         # Write error context for analysis
-        write_error_context(
-            event_data,
-            str(e),
-            'data_format_error'
-        )
+        write_error_context(event_data, str(e), 'data_format_error')
         
         # Don't raise - let message be ACK'd and sent to DLQ
-        # This prevents infinite retry loops on bad data
-        logger.warning(
-            f'📬 Message {message_id[:8]}... acknowledged despite error - Will go to DLQ',
-            extra={'pubsub_message_id': message_id, 'action': 'send_to_dlq'}
-        )
+        logger.warning(f'📬 Message {message_id[:8]}... acknowledged despite error - Will go to DLQ')
         
     except Exception as e:
         # Unexpected errors - these might be transient
@@ -639,30 +679,31 @@ def process_pubsub_message(cloud_event: CloudEvent) -> None:
         
         total_duration = time.time() - processing_start
         
+        # STRUCTURED METRIC LOG - Unexpected error
         logger.error(
-            f'🚨 Unexpected error processing message {message_id[:8]}... - '
-            f'Collection: {collection} - '
-            f'Operation: {operation} - '
-            f'Error: {e} - '
-            f'Duration: {total_duration*1000:.1f}ms',
+            "METRIC:unexpected_error",
             extra={
-                'event': 'message_processing_unexpected_error',
-                'pubsub_message_id': message_id,
-                'collection': collection,
-                'operation': operation,
-                'error': str(e),
-                'error_type': type(e).__name__,
-                'total_latency_ms': total_duration * 1000
-            },
-            exc_info=True
+                'labels': {
+                    'component': 'cloud_function_writer',
+                    'pipeline_stage': 'storage',
+                    'collection': collection,
+                    'error_type': type(e).__name__
+                },
+                'jsonPayload': {
+                    'event_type': 'unexpected_error',
+                    'collection': collection,
+                    'operation': operation,
+                    'message_id': message_id[:8] if message_id else 'unknown',
+                    'correlation_id': correlation_id,
+                    'error': str(e),
+                    'total_latency_ms': total_duration * 1000,
+                    'timestamp_millis': int(time.time() * 1000)
+                }
+            }
         )
         
         # Write error context
-        write_error_context(
-            event_data,
-            str(e),
-            'unexpected_error'
-        )
+        write_error_context(event_data, str(e), 'unexpected_error')
         
         # Raise to trigger retry
         raise RuntimeError(f'Failed to process message {message_id}: {e}')
